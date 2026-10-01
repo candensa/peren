@@ -97,12 +97,15 @@ peren dev fleet.toml
 
 ```text
 config: .
-service api worker=worker.js
+dev: source=peren env_profile=peren data=./data bucket=file
+service api entrypoint=stateless worker=worker.js
 socket public service=api listen=127.0.0.1:8080
+info: dev uses loopback listeners with ephemeral ports and an isolated in-memory bucket
 public: http://127.0.0.1:54321
+dev inspector public: http://127.0.0.1:54321/__peren/dev
 ```
 
-Call the `public:` URL. The port is the one this process bound, which is not necessarily `8080`. The other printed lines show the shape of the topology. Use `--json` when a script needs a stable shape.
+Call the `public:` URL. The port is the one this process bound, which is not necessarily `8080`. The other printed lines show the session shape and local diagnostics. Use `--json` when a script needs a stable shape. The `dev inspector` URL returns JSON for the active local session.
 
 ## Send a request
 
@@ -117,6 +120,13 @@ hello from Peren
 ```
 
 That response proves Peren loaded the Worker bundle, opened the public socket, and dispatched the request through an isolate.
+
+While `peren dev` is running, request and console events are printed as they happen:
+
+```text
+api GET / status=200 outcome=ok wall_time_ms=4 request_id=...
+api console Warn cache miss request_id=...
+```
 
 ## Failure: missing Worker file
 

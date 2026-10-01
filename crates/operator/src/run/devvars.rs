@@ -10,7 +10,6 @@ use super::ProcessEnvironment;
 
 pub(super) struct LocalDevEnvironment {
     values: BTreeMap<String, String>,
-    #[allow(dead_code)]
     report: LocalEnvReport,
 }
 
@@ -44,6 +43,10 @@ impl LocalDevEnvironment {
             values: loaded.values,
             report: loaded.report,
         })
+    }
+
+    pub(super) const fn report(&self) -> &LocalEnvReport {
+        &self.report
     }
 }
 

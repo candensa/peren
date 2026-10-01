@@ -38,6 +38,169 @@ use crate::{
 };
 use crate::{admission::Mode as AdmissionMode, process::App};
 
+#[derive(serde::Deserialize)]
+pub(super) struct DevEventsQuery {
+    #[serde(default = "default_event_limit")]
+    limit: usize,
+}
+
+const fn default_event_limit() -> usize {
+    100
+}
+
+pub(super) async fn dev_overview(State(app): State<App>) -> impl IntoResponse {
+    if !app.dev_inspector {
+        return AxumStatusCode::NOT_FOUND.into_response();
+    }
+    AxumJson(serde_json::json!({
+        "ready": app.readiness.load(Ordering::Acquire),
+        "node": app.node.as_uuid(),
+        "incarnation": app.incarnation,
+        "topology": dev_topology_json(&app),
+        "health": dev_health_json(&app),
+    }))
+    .into_response()
+}
+
+pub(super) async fn dev_topology(State(app): State<App>) -> impl IntoResponse {
+    if !app.dev_inspector {
+        return AxumStatusCode::NOT_FOUND.into_response();
+    }
+    AxumJson(dev_topology_json(&app)).into_response()
+}
+
+pub(super) async fn dev_events(
+    State(app): State<App>,
+    Query(query): Query<DevEventsQuery>,
+) -> impl IntoResponse {
+    if !app.dev_inspector {
+        return AxumStatusCode::NOT_FOUND.into_response();
+    }
+    match crate::tail::read_recent(&app.data.join("tail"), query.limit.min(1_000)) {
+        Ok(report) => AxumJson(serde_json::json!({ "events": report.events })).into_response(),
+        Err(error) => (
+            AxumStatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(serde_json::json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+pub(super) async fn dev_health(State(app): State<App>) -> impl IntoResponse {
+    if !app.dev_inspector {
+        return AxumStatusCode::NOT_FOUND.into_response();
+    }
+    AxumJson(dev_health_json(&app)).into_response()
+}
+
+fn dev_health_json(app: &App) -> serde_json::Value {
+    let snapshot = app.admission.snapshot();
+    serde_json::json!({
+        "ready": app.readiness.load(Ordering::Acquire),
+        "retired": app.retired.load(Ordering::Acquire),
+        "admission": admission_name(snapshot.mode),
+        "capacity": snapshot.capacity,
+        "active": snapshot.active,
+        "available": snapshot.available,
+        "admitted": snapshot.admitted,
+        "completed": snapshot.completed,
+        "refused": snapshot.refused,
+        "disk_removal_safe": snapshot.active == 0,
+    })
+}
+
+fn dev_topology_json(app: &App) -> serde_json::Value {
+    let services = app
+        .config
+        .raw
+        .services
+        .iter()
+        .map(|service| {
+            let bindings = service
+                .bindings
+                .iter()
+                .map(|(name, binding)| {
+                    serde_json::json!({
+                        "name": name,
+                        "kind": binding_kind(binding),
+                    })
+                })
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "name": service.name,
+                "worker": service.worker_bundle_path,
+                "entrypoint": entrypoint_kind(&service.entrypoint),
+                "bindings": bindings,
+                "queue_consumers": queue_consumers(service),
+                "tail_consumers": service.tail_consumers.iter().map(|tail| tail.service.clone()).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let sockets = app
+        .config
+        .raw
+        .sockets
+        .iter()
+        .map(|socket| {
+            serde_json::json!({
+                "name": socket.name,
+                "service": socket.service,
+                "listen": socket.listen,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "services": services,
+        "sockets": sockets,
+        "bucket": format!("{:?}", app.config.raw.bucket.kind).to_lowercase(),
+        "data": app.data,
+    })
+}
+
+fn queue_consumers(service: &peren_config::Service) -> Vec<String> {
+    service
+        .consumes_queues
+        .iter()
+        .map(|consumer| match consumer {
+            peren_config::QueueConsumer::Name(name) => name.clone(),
+            peren_config::QueueConsumer::Settings(settings) => settings.queue.clone(),
+        })
+        .collect()
+}
+
+fn entrypoint_kind(entrypoint: &peren_config::Entrypoint) -> &'static str {
+    match entrypoint {
+        peren_config::Entrypoint::Stateless => "stateless",
+        peren_config::Entrypoint::DurableObject { .. } => "durable_object",
+    }
+}
+
+fn binding_kind(binding: &peren_config::Binding) -> &'static str {
+    match binding {
+        peren_config::Binding::Ai { .. } => "ai",
+        peren_config::Binding::AnalyticsEngine { .. } => "analytics_engine",
+        peren_config::Binding::AwsSigv4 { .. } => "aws_sigv4",
+        peren_config::Binding::Container { .. } => "container",
+        peren_config::Binding::D1Database { .. } => "d1",
+        peren_config::Binding::Dispatcher { .. } => "dispatcher",
+        peren_config::Binding::DurableObjectNamespace { .. } => "durable_object_namespace",
+        peren_config::Binding::Hyperdrive { .. } => "hyperdrive",
+        peren_config::Binding::Images { .. } => "images",
+        peren_config::Binding::Kv { .. } => "kv",
+        peren_config::Binding::Loader => "loader",
+        peren_config::Binding::MtlsCertificate { .. } => "mtls_certificate",
+        peren_config::Binding::Queue { .. } => "queue",
+        peren_config::Binding::R2Bucket { .. } => "r2",
+        peren_config::Binding::RateLimiter { .. } => "rate_limiter",
+        peren_config::Binding::SecretsStoreSecret { .. } => "secret",
+        peren_config::Binding::Service { .. } => "service",
+        peren_config::Binding::Vectorize { .. } => "vectorize",
+        peren_config::Binding::Outbound { .. } => "outbound",
+        peren_config::Binding::Workflow { .. } => "workflow",
+        peren_config::Binding::Assets => "assets",
+    }
+}
+
 #[cfg(test)]
 #[derive(Deserialize)]
 pub(super) struct TestInvocation {

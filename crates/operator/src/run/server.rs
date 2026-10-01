@@ -62,15 +62,23 @@ async fn start_with_inherited(
 pub(super) async fn dev(command: cli::Worker) -> Result<(), CliError> {
     let session = Session::load(&command)?;
     session.print_topology(command.json)?;
+    let tail_path = session.tail_path();
     let config = prepare_test_server(session.raw)?;
     let progress = Progress::start(Style::Dots, "Starting local Peren");
-    let process = Process::start(config, &session.environment).await?;
+    let process = Process::start_development(config, &session.environment).await?;
     progress.success("Local Peren is running");
     for (name, address) in process.listeners() {
         println!("{name}: http://{address}");
     }
+    for (name, address) in process.listeners() {
+        println!("dev inspector {name}: http://{address}/__peren/dev");
+    }
     std::io::stdout().flush().map_err(CliError::ReadyOutput)?;
+    let live_tail = (!command.json).then(|| tokio::spawn(super::develop::follow_tail(tail_path)));
     shutdown_signal().await?;
+    if let Some(task) = live_tail {
+        task.abort();
+    }
     let progress = Progress::start(Style::Line, "Stopping local Peren");
     process.shutdown().await?;
     progress.success("Local Peren stopped");
@@ -81,7 +89,7 @@ pub(super) async fn test(command: cli::Worker) -> Result<(), CliError> {
     let session = Session::load(&command)?;
     let topology = session.topology();
     let config = prepare_test_server(session.raw)?;
-    let process = Process::start(config, &session.environment).await?;
+    let process = Process::start_development(config, &session.environment).await?;
     println!(
         "{}",
         serde_json::json!({ "ready": true, "sockets": process.listeners(), "topology": topology })

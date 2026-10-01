@@ -59,7 +59,7 @@ pub(super) async fn listener(
 }
 
 pub(super) fn router(app: App) -> Router {
-    let router = Router::new()
+    let mut router = Router::new()
         .route("/healthz", get(|| async { StatusCode::OK }))
         .route(
             "/readyz",
@@ -97,6 +97,13 @@ pub(super) fn router(app: App) -> Router {
             "/control/v1/deployments/health",
             get(control::deployment_health),
         );
+    if app.dev_inspector {
+        router = router
+            .route("/__peren/dev", get(control::dev_overview))
+            .route("/__peren/dev/topology", get(control::dev_topology))
+            .route("/__peren/dev/events", get(control::dev_events))
+            .route("/__peren/dev/health", get(control::dev_health));
+    }
 
     #[cfg(test)]
     let router = test_router(router);
