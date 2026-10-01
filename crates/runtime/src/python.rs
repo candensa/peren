@@ -1,7 +1,8 @@
 use std::{
     io::{BufRead, BufReader, Write},
-    process::{Command, Stdio},
-    sync::Arc,
+    process::{Child, Command, ExitStatus, Stdio},
+    sync::{Arc, mpsc},
+    time::{Duration, Instant},
 };
 
 use crate::{
@@ -538,7 +539,7 @@ class WorkflowBinding:
     async def create(self, options=None):
         options = options or {}
         id = options.get("id") or str(HOST.call("workflow_id", {}))
-        await HOST.call("workflow_write", {"binding": self.binding, "id": id, "status": "running"})
+        HOST.call("workflow_write", {"binding": self.binding, "id": id, "status": "running"})
         return Workflow(self.binding, id)
 
     def get(self, id):
@@ -987,6 +988,11 @@ impl PythonRuntime {
         environment: WorkerEnvironment,
         hosts: PythonHosts,
     ) -> Result<Self, EngineError> {
+        if !unsafe_python_compat_enabled(&environment) {
+            return Err(EngineError::Python(
+                "python:compat requires PEREN_UNSAFE_PYTHON_COMPAT=1; use python:pyodide for production execution".into(),
+            ));
+        }
         let module = bundle
             .module(bundle.entry())
             .ok_or_else(|| EngineError::Python("python entry module is missing".into()))?;
@@ -1180,7 +1186,7 @@ impl PythonRuntime {
             .current_dir(invocation_dir.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
             .map_err(|error| EngineError::Python(error.to_string()))?;
         let input = serde_json::to_vec(&serde_json::json!({
@@ -1213,16 +1219,32 @@ impl PythonRuntime {
             .stdin
             .take()
             .ok_or_else(|| EngineError::Python("python stdin unavailable".into()))?;
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        loop {
-            line.clear();
-            let bytes = reader
-                .read_line(&mut line)
-                .map_err(|error| EngineError::Python(error.to_string()))?;
-            if bytes == 0 {
-                break;
+        let mut child = ChildGuard::new(child);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) => {
+                        let _ = tx.send(Ok(None));
+                        break;
+                    }
+                    Ok(_) => {
+                        if tx.send(Ok(Some(line.clone()))).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = tx.send(Err(error.to_string()));
+                        break;
+                    }
+                }
             }
+        });
+        let deadline = deadline(timeout);
+        while let Some(line) = recv_python_line(&rx, deadline, &mut child)? {
             let envelope = serde_json::from_str::<serde_json::Value>(&line)
                 .map_err(|error| EngineError::Python(error.to_string()))?;
             match envelope.get("kind").and_then(serde_json::Value::as_str) {
@@ -1403,7 +1425,8 @@ impl PythonRuntime {
                             .put(&request.namespace, request.key.as_bytes(), &request.value)
                             .await
                             .map_err(host_error)?;
-                        self.storage()?.commit().await.map_err(host_error)?;
+                        self.committed_revision =
+                            self.storage()?.commit().await.map_err(host_error)?;
                         committed = true;
                         Ok::<(), EngineError>(())
                     }
@@ -1428,13 +1451,23 @@ impl PythonRuntime {
                 let request: PythonKvGet = parse_payload(payload)?;
                 if is_native(&request.provider) {
                     self.storage()?.begin().await.map_err(host_error)?;
-                    let _ = self
-                        .storage()?
-                        .delete(&request.namespace, request.key.as_bytes())
-                        .await
-                        .map_err(host_error)?;
-                    self.storage()?.commit().await.map_err(host_error)?;
-                    Ok(serde_json::Value::Bool(true))
+                    let mut committed = false;
+                    let result = async {
+                        let deleted = self
+                            .storage()?
+                            .delete(&request.namespace, request.key.as_bytes())
+                            .await
+                            .map_err(host_error)?;
+                        self.committed_revision =
+                            self.storage()?.commit().await.map_err(host_error)?;
+                        committed = true;
+                        Ok::<_, EngineError>(serde_json::Value::Bool(deleted))
+                    }
+                    .await;
+                    if !committed {
+                        let _ = self.storage()?.rollback().await;
+                    }
+                    result
                 } else {
                     to_json(
                         self.kv()?
@@ -1598,17 +1631,26 @@ impl PythonRuntime {
                 });
                 let key = format!("{}/{}.json", request.binding, request.id);
                 self.storage()?.begin().await.map_err(host_error)?;
-                self.storage()?
-                    .put(
-                        "workflows",
-                        key.as_bytes(),
-                        &serde_json::to_vec(&state)
-                            .map_err(|error| EngineError::Response(error.to_string()))?,
-                    )
-                    .await
-                    .map_err(host_error)?;
-                self.storage()?.commit().await.map_err(host_error)?;
-                Ok(state)
+                let mut committed = false;
+                let result = async {
+                    self.storage()?
+                        .put(
+                            "workflows",
+                            key.as_bytes(),
+                            &serde_json::to_vec(&state)
+                                .map_err(|error| EngineError::Response(error.to_string()))?,
+                        )
+                        .await
+                        .map_err(host_error)?;
+                    self.committed_revision = self.storage()?.commit().await.map_err(host_error)?;
+                    committed = true;
+                    Ok::<_, EngineError>(state)
+                }
+                .await;
+                if !committed {
+                    let _ = self.storage()?.rollback().await;
+                }
+                result
             }
             _ => Err(EngineError::UnsupportedRuntimeFeature {
                 runtime: "python",
@@ -1777,11 +1819,107 @@ impl From<PythonLog> for WorkerLogEvent {
     }
 }
 
+struct ChildGuard {
+    child: Option<Child>,
+}
+
+impl ChildGuard {
+    const fn new(child: Child) -> Self {
+        Self { child: Some(child) }
+    }
+
+    fn kill(&mut self) {
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+        }
+    }
+
+    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        let mut child = self
+            .child
+            .take()
+            .expect("python child guard cannot be waited twice");
+        child.wait()
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+fn deadline(timeout: Duration) -> Option<Instant> {
+    (timeout != Duration::MAX)
+        .then(|| Instant::now().checked_add(timeout))
+        .flatten()
+}
+
+fn recv_python_line(
+    rx: &mpsc::Receiver<Result<Option<String>, String>>,
+    deadline: Option<Instant>,
+    child: &mut ChildGuard,
+) -> Result<Option<String>, EngineError> {
+    let message = if let Some(deadline) = deadline {
+        let now = Instant::now();
+        if now >= deadline {
+            child.kill();
+            return Err(EngineError::Python(
+                "python invocation exceeded its execution deadline".into(),
+            ));
+        }
+        rx.recv_timeout(deadline.saturating_duration_since(now))
+            .map_err(|error| match error {
+                mpsc::RecvTimeoutError::Timeout => {
+                    child.kill();
+                    EngineError::Python("python invocation exceeded its execution deadline".into())
+                }
+                mpsc::RecvTimeoutError::Disconnected => {
+                    EngineError::Python("python stdout reader disconnected".into())
+                }
+            })?
+    } else {
+        rx.recv()
+            .map_err(|_| EngineError::Python("python stdout reader disconnected".into()))?
+    };
+    message.map_err(EngineError::Python)
+}
+
+fn unsafe_python_compat_enabled(environment: &WorkerEnvironment) -> bool {
+    if cfg!(test) {
+        return true;
+    }
+    if environment
+        .values()
+        .get("PEREN_UNSAFE_PYTHON_COMPAT")
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    {
+        return true;
+    }
+    std::env::var("PEREN_UNSAFE_PYTHON_COMPAT")
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
 fn block_on_host<F>(future: F) -> F::Output
 where
-    F: std::future::Future,
+    F: std::future::Future + Send,
+    F::Output: Send,
 {
-    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
+    std::thread::scope(|scope| {
+        scope
+            .spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("host-call runtime should build")
+                    .block_on(future)
+            })
+            .join()
+            .expect("host-call runtime thread should not panic")
+    })
 }
 
 fn parse_payload<T: serde::de::DeserializeOwned>(

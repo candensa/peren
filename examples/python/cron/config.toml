@@ -15,7 +15,7 @@ leaf_key_path = "certs/leaf-key.pem"
 name = "cron-python"
 runtime = "python"
 python_engine = "compat"
-worker_bundle_path = "worker.py"
+worker_bundle_path = "examples/python/cron/worker.py"
 compatibility_date = "2026-01-01"
 cron_triggers = [{ expression = "0 */5 * * * * *" }]
 

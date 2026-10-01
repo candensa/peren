@@ -10,6 +10,7 @@ Use this page before you migrate or deploy. It lists what Peren runs, what it li
 These work in this build:
 
 - JavaScript Workers in V8 isolates, with `export default` as the entry and `fetch(request, env, ctx)` where `ctx` is `{ waitUntil }`.
+- Python Workers through the Pyodide executor. The compatibility executor is for local examples and smoke tests only, and requires `PEREN_UNSAFE_PYTHON_COMPAT=1` before it will start.
 - Host-gated global `fetch`, outbound bindings, client mTLS certificates, and AWS SigV4 signing in the node process.
 - KV, native D1 and Turso, R2-style object storage, queues, cache via global `caches`, AI, vector indexes, service bindings, dispatch namespaces, workflows, rate limiting, analytics write points, Hyperdrive metadata, images gateways, loaders, and secrets-store strings.
 - Durable Object namespaces with stub `fetch` and cell-backed storage in the Peren host model.

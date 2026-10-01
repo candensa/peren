@@ -15,7 +15,7 @@ leaf_key_path = "certs/leaf-key.pem"
 name = "hello-python"
 runtime = "python"
 python_engine = "compat"
-worker_bundle_path = "worker.py"
+worker_bundle_path = "examples/python/hello/worker.py"
 compatibility_date = "2026-01-01"
 
 [services.vars]

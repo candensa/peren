@@ -10,8 +10,11 @@ use std::{
 };
 
 use deno_core::{
-    FastString, FsModuleLoader, JsRuntime, OpState, PollEventLoopOptions, RuntimeOptions, op2, v8,
+    FastString, JsRuntime, ModuleLoadOptions, ModuleLoadReferrer, ModuleLoadResponse, ModuleLoader,
+    ModuleResolveResponse, ModuleSource, ModuleSourceCode, ModuleSpecifier, ModuleType, OpState,
+    PollEventLoopOptions, RuntimeOptions, op2, v8,
 };
+use deno_error::JsErrorBox;
 
 use crate::{
     Capabilities, EngineError, HttpRequest, HttpResponse, InvocationLimits, IsolateLimits,
@@ -65,6 +68,7 @@ pub struct PyodideRuntime {
     runtime: JsRuntime,
     limits: IsolateLimits,
     heap_exceeded: Arc<AtomicBool>,
+    durable_class: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -215,7 +219,7 @@ impl PyodideRuntime {
         let mut extensions = web_extensions(hosts);
         extensions.push(pyodide_files::init(PyodideFileRoot { root: root.clone() }));
         let mut runtime = JsRuntime::new(RuntimeOptions {
-            module_loader: Some(Rc::new(FsModuleLoader)),
+            module_loader: Some(Rc::new(PyodideModuleLoader::new(&root)?)),
             extensions,
             create_params: Some(create_params),
             ..Default::default()
@@ -230,20 +234,36 @@ impl PyodideRuntime {
         });
 
         install_shell_file_api(&mut runtime, &root)?;
-        bootstrap_pyodide(&mut runtime, &root, bundle, environment).await?;
+        bootstrap_pyodide(
+            &mut runtime,
+            &root,
+            bundle,
+            environment,
+            &limits,
+            &heap_exceeded,
+        )
+        .await?;
         Ok(Self {
             runtime,
             limits,
             heap_exceeded,
+            durable_class: None,
         })
     }
 
-    #[allow(
-        clippy::unused_self,
-        reason = "dispatch methods mirror the shared runtime interface before the executor stores state"
-    )]
-    pub fn bind_durable_class(&mut self, _class_name: &str) -> Result<(), EngineError> {
-        Self::unsupported("durable class binding")
+    pub fn bind_durable_class(&mut self, class_name: &str) -> Result<(), EngineError> {
+        self.durable_class = Some(class_name.to_string());
+        let class_name = serde_json::to_string(class_name)
+            .map_err(|error| EngineError::Request(error.to_string()))?;
+        self.runtime
+            .execute_script(
+                "peren:pyodide:durable-class",
+                FastString::from(format!(
+                    "globalThis.__perenPyodideDurableClass = {class_name}; if (globalThis.__perenPyodide) globalThis.__perenPyodide.globals.set('__perenPyodideDurableClass', globalThis.__perenPyodideDurableClass);"
+                )),
+            )
+            .map_err(|error| EngineError::JavaScript(error.to_string()))?;
+        Ok(())
     }
 
     #[allow(
@@ -355,13 +375,16 @@ impl PyodideRuntime {
         self.dispatch_event("activity", to_json(event)?).await
     }
 
-    #[allow(
-        clippy::unused_self,
-        reason = "dispatch methods mirror the shared runtime interface before the executor stores state"
-    )]
     #[must_use]
-    pub const fn committed_revision(&self) -> peren_primitives::StorageRevision {
-        peren_primitives::StorageRevision::new(0)
+    pub fn committed_revision(&self) -> peren_primitives::StorageRevision {
+        self.runtime
+            .op_state()
+            .borrow()
+            .try_borrow::<crate::host::InvocationStorage>()
+            .map_or_else(
+                peren_primitives::StorageRevision::default,
+                crate::host::InvocationStorage::revision,
+            )
     }
 
     #[allow(
@@ -413,12 +436,76 @@ impl PyodideRuntime {
         deno_core::serde_v8::from_v8(scope, value)
             .map_err(|error| EngineError::Response(error.to_string()))
     }
+}
 
-    fn unsupported<T>(feature: &'static str) -> Result<T, EngineError> {
-        Err(EngineError::UnsupportedRuntimeFeature {
-            runtime: "python:pyodide",
-            feature,
-        })
+struct PyodideModuleLoader {
+    root: PathBuf,
+}
+
+impl PyodideModuleLoader {
+    fn new(root: &Path) -> Result<Self, EngineError> {
+        let root = root.canonicalize().map_err(|error| {
+            EngineError::Python(format!("canonicalize Pyodide artifact root: {error}"))
+        })?;
+        Ok(Self { root })
+    }
+
+    fn ensure_under_root(&self, specifier: &ModuleSpecifier) -> Result<PathBuf, JsErrorBox> {
+        let path = specifier
+            .to_file_path()
+            .map_err(|()| JsErrorBox::generic("Pyodide modules must use file URLs"))?
+            .canonicalize()
+            .map_err(JsErrorBox::from_err)?;
+        if !path.starts_with(&self.root) {
+            return Err(JsErrorBox::generic(format!(
+                "Pyodide module is outside artifact root: {}",
+                path.display()
+            )));
+        }
+        Ok(path)
+    }
+}
+
+impl ModuleLoader for PyodideModuleLoader {
+    fn resolve(
+        &self,
+        specifier: &str,
+        referrer: &str,
+        kind: deno_core::ResolutionKind,
+    ) -> ModuleResolveResponse {
+        let resolved =
+            deno_core::resolve_import(specifier, referrer).map_err(JsErrorBox::from_err)?;
+        if matches!(kind, deno_core::ResolutionKind::DynamicImport) {
+            self.ensure_under_root(&resolved)?;
+        }
+        Ok(resolved)
+    }
+
+    fn load(
+        &self,
+        module_specifier: &ModuleSpecifier,
+        _maybe_referrer: Option<&ModuleLoadReferrer>,
+        _options: ModuleLoadOptions,
+    ) -> ModuleLoadResponse {
+        let result = (|| {
+            let path = self.ensure_under_root(module_specifier)?;
+            let code = std::fs::read(path).map_err(JsErrorBox::from_err)?;
+            let module_type = if Path::new(module_specifier.path())
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("wasm"))
+            {
+                ModuleType::Wasm
+            } else {
+                ModuleType::JavaScript
+            };
+            Ok(ModuleSource::new(
+                module_type,
+                ModuleSourceCode::Bytes(code.into_boxed_slice().into()),
+                module_specifier,
+                None,
+            ))
+        })();
+        ModuleLoadResponse::Async(Box::pin(async move { result }))
     }
 }
 
@@ -471,6 +558,8 @@ async fn bootstrap_pyodide(
     root: &Path,
     bundle: WorkerBundle,
     environment: WorkerEnvironment,
+    limits: &IsolateLimits,
+    heap_exceeded: &Arc<AtomicBool>,
 ) -> Result<(), EngineError> {
     let root_url = deno_core::url::Url::from_directory_path(root)
         .map_err(|()| EngineError::Python("Pyodide artifact root is not a directory URL".into()))?;
@@ -510,6 +599,7 @@ globalThis.__perenPyodide = await loadPyodide({{
 globalThis.__perenPyodideModules = {modules};
 globalThis.__perenPyodideEnv = {env};
 globalThis.__perenPyodideEntry = {entry:?};
+globalThis.__perenPyodideDurableClass = null;
 globalThis.__perenPyodidePackages = {packages};
 if (globalThis.__perenPyodidePackages.length > 0) {{
   await globalThis.__perenPyodide.loadPackage(globalThis.__perenPyodidePackages);
@@ -521,6 +611,7 @@ for (const [name, source] of globalThis.__perenPyodideModules) {{
   globalThis.__perenPyodide.FS.writeFile(path, source);
 }}
 globalThis.__perenPyodide.globals.set("__perenPyodideEntry", globalThis.__perenPyodideEntry);
+globalThis.__perenPyodide.globals.set("__perenPyodideDurableClass", globalThis.__perenPyodideDurableClass);
 globalThis.__perenPyodide.globals.set("__perenPyodideEnvJson", JSON.stringify(globalThis.__perenPyodideEnv));
 globalThis.__perenPyodideHostCall = async (op, payloadJson) => {{
   const payload = JSON.parse(payloadJson || "{{}}");
@@ -638,18 +729,24 @@ globalThis.__perenPyodideDispatchHttp = async (request) => {{
     );
     let module = deno_core::resolve_url("peren:pyodide:bootstrap")
         .map_err(|error| EngineError::JavaScript(error.to_string()))?;
-    let id = runtime
-        .load_side_es_module_from_code(&module, FastString::from(source))
-        .await
-        .map_err(|error| EngineError::JavaScript(error.to_string()))?;
-    let evaluation = runtime.mod_evaluate(id);
-    runtime
-        .run_event_loop(PollEventLoopOptions::default())
-        .await
-        .map_err(|error| EngineError::JavaScript(error.to_string()))?;
-    evaluation
-        .await
-        .map_err(|error| EngineError::JavaScript(error.to_string()))
+    let watchdog = Watchdog::start(runtime, limits.execution_time());
+    let result = async {
+        let id = runtime
+            .load_side_es_module_from_code(&module, FastString::from(source))
+            .await
+            .map_err(|error| EngineError::JavaScript(error.to_string()))?;
+        let evaluation = runtime.mod_evaluate(id);
+        runtime
+            .run_event_loop(PollEventLoopOptions::default())
+            .await
+            .map_err(|error| EngineError::JavaScript(error.to_string()))?;
+        evaluation
+            .await
+            .map_err(|error| EngineError::JavaScript(error.to_string()))
+    }
+    .await;
+    watchdog.finish(runtime, heap_exceeded)?;
+    result
 }
 
 const PYODIDE_RUNNER: &str = r#"
@@ -663,10 +760,12 @@ BLOCKED_MODULES = {
     "fcntl",
     "grp",
     "idlelib",
+    "js",
     "lib2to3",
     "multiprocessing",
     "msvcrt",
     "pty",
+    "pyodide_js",
     "pwd",
     "resource",
     "socket",

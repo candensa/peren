@@ -179,6 +179,9 @@ value_for() {
 prepare_env() {
   local config="$1"
   local section="" line name
+  if grep -Eq '^[[:space:]]*python_engine[[:space:]]*=[[:space:]]*"compat"' "$config"; then
+    export_if_unset PEREN_UNSAFE_PYTHON_COMPAT 1
+  fi
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^\[ ]]; then
       section="$line"

@@ -51,6 +51,8 @@ runtime = "python"
 python_engine = "compat"
 worker_bundle_path = "{}"
 compatibility_date = "2026-01-01"
+[services.vars]
+PEREN_UNSAFE_PYTHON_COMPAT = "1"
 [[sockets]]
 name = "public"
 listen = "127.0.0.1:0"

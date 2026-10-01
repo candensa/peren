@@ -137,18 +137,19 @@ fn python_imports(
     for line in source.lines() {
         let line = line.trim_start();
         let candidates = if let Some(rest) = line.strip_prefix("from ") {
-            let Some((module, _)) = rest.split_once(" import ") else {
+            let Some((module, names)) = rest.split_once(" import ") else {
                 continue;
             };
-            vec![module.trim()]
+            from_python_import_candidates(module.trim(), names)
         } else if let Some(rest) = line.strip_prefix("import ") {
             rest.split(',')
                 .filter_map(|part| part.split_whitespace().next())
+                .map(str::to_string)
                 .collect::<Vec<_>>()
         } else {
             continue;
         };
-        for candidate in candidates {
+        for candidate in &candidates {
             if candidate.is_empty() || candidate.contains('*') {
                 continue;
             }
@@ -159,9 +160,33 @@ fn python_imports(
             } else if let Some((module, file)) = absolute_python_import(root, candidate)? {
                 found.push((module, file));
             }
+            for (module, file) in python_package_inits(root, from, candidate)? {
+                found.push((module, file));
+            }
         }
     }
     Ok(found)
+}
+
+fn from_python_import_candidates(module: &str, names: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    if !module.is_empty() {
+        candidates.push(module.to_string());
+    }
+    for name in names.split(',') {
+        let Some(name) = name.split_whitespace().next() else {
+            continue;
+        };
+        if name.is_empty() || name == "*" {
+            continue;
+        }
+        if module.is_empty() || module.chars().all(|value| value == '.') {
+            candidates.push(format!("{module}{name}"));
+        } else {
+            candidates.push(format!("{module}.{name}"));
+        }
+    }
+    candidates
 }
 
 fn relative_python_import(
@@ -192,6 +217,37 @@ fn absolute_python_import(
         path.push(component);
     }
     python_module_at(root, &path)
+}
+
+fn python_package_inits(
+    root: &Path,
+    from: &Path,
+    specifier: &str,
+) -> Result<Vec<(ModuleName, PathBuf)>, ProcessError> {
+    let mut found = Vec::new();
+    let mut base = if specifier.starts_with('.') {
+        let dots = specifier.chars().take_while(|value| *value == '.').count();
+        let rest = &specifier[dots..];
+        let mut base = from.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+        for _ in 1..dots {
+            base.pop();
+        }
+        if rest.is_empty() {
+            return Ok(found);
+        }
+        (base, rest)
+    } else {
+        (root.to_path_buf(), specifier)
+    };
+    let components: Vec<_> = base.1.split('.').collect();
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        base.0.push(component);
+        let init = base.0.join("__init__.py");
+        if init.is_file() {
+            found.push((name(root, &init)?, init));
+        }
+    }
+    Ok(found)
 }
 
 fn python_module_at(
@@ -384,13 +440,15 @@ compatibility_date = "2026-01-01"
         let entry = root.join("worker.py");
         let hello = root.join("hello.py");
         let pkg = root.join("pkg").join("__init__.py");
+        let util = root.join("pkg").join("util.py");
         std::fs::write(
             &entry,
-            "from hello import hello\nimport pkg\nfrom missing import ignored\n",
+            "from hello import hello\nfrom pkg import util\nimport pkg\nfrom missing import ignored\n",
         )
         .unwrap();
         std::fs::write(&hello, "def hello(): return 'hello'\n").unwrap();
         std::fs::write(&pkg, "value = 'pkg'\n").unwrap();
+        std::fs::write(&util, "value = 'util'\n").unwrap();
         let config = format!(
             r#"
 [node]
@@ -431,6 +489,11 @@ compatibility_date = "2026-01-01"
         assert!(
             bundle
                 .module(&ModuleName::parse("pkg/__init__.py").unwrap())
+                .is_some()
+        );
+        assert!(
+            bundle
+                .module(&ModuleName::parse("pkg/util.py").unwrap())
                 .is_some()
         );
         std::fs::remove_dir_all(root).unwrap();
