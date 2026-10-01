@@ -2,7 +2,9 @@ use std::{num::NonZeroUsize, path::Path, sync::Arc};
 
 use peren_bindings::SharedStorageHost;
 use peren_primitives::{CellId, NodeId, OwnershipEpoch};
-use peren_replication::{ReplicaPayload, ReplicaRepository, Replicator, RepositoryError};
+use peren_replication::{
+    DurableReceipt, ReplicaPayload, ReplicaRepository, Replicator, RepositoryError,
+};
 use peren_runtime::{
     Capabilities, DurableStorageHost, EngineError, HttpRequest, HttpResponse, InvocationLimits,
     IsolateLimits, QueueDispatch, QueueEvent, R2BucketHost, ScheduledEvent, TailEvent,
@@ -30,6 +32,7 @@ pub struct WorkerCell<L, R> {
     runtime: WorkerRuntime,
     wal_offset: u64,
     generation: peren_primitives::StorageRevision,
+    last_commit: Option<CellCommitSummary>,
     state: CellState,
 }
 
@@ -81,6 +84,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             runtime,
             wal_offset: 0,
             generation: peren_primitives::StorageRevision::default(),
+            last_commit: None,
             state: CellState::Active,
         })
     }
@@ -109,6 +113,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             runtime,
             wal_offset: 0,
             generation: peren_primitives::StorageRevision::default(),
+            last_commit: None,
             state: CellState::Active,
         })
     }
@@ -161,6 +166,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             runtime,
             wal_offset: 0,
             generation: peren_primitives::StorageRevision::default(),
+            last_commit: None,
             state: CellState::Active,
         })
     }
@@ -176,6 +182,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         limits: InvocationLimits,
     ) -> Result<HttpResponse, CellError> {
         self.ensure_active()?;
+        self.last_commit = None;
         self.verify().await?;
         let response = self.runtime.dispatch_http(request, limits).await?;
         let revision = self.runtime.committed_revision();
@@ -190,8 +197,14 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         self.runtime.take_console_events()
     }
 
+    #[must_use]
+    pub const fn last_commit(&self) -> Option<CellCommitSummary> {
+        self.last_commit
+    }
+
     pub async fn dispatch_alarm(&mut self) -> Result<(), CellError> {
         self.ensure_active()?;
+        self.last_commit = None;
         self.verify().await?;
         self.runtime.dispatch_alarm().await?;
         let revision = self.runtime.committed_revision();
@@ -203,6 +216,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
 
     pub async fn dispatch_scheduled(&mut self, event: ScheduledEvent) -> Result<(), CellError> {
         self.ensure_active()?;
+        self.last_commit = None;
         self.verify().await?;
         self.runtime.dispatch_scheduled(event).await?;
         let revision = self.runtime.committed_revision();
@@ -214,6 +228,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
 
     pub async fn dispatch_queue(&mut self, event: QueueEvent) -> Result<QueueDispatch, CellError> {
         self.ensure_active()?;
+        self.last_commit = None;
         self.verify().await?;
         let dispatch = self.runtime.dispatch_queue(event).await?;
         let revision = self.runtime.committed_revision();
@@ -226,6 +241,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
 
     pub async fn dispatch_tail(&mut self, event: TailEvent) -> Result<(), CellError> {
         self.ensure_active()?;
+        self.last_commit = None;
         self.verify().await?;
         self.runtime.dispatch_tail(event).await?;
         let revision = self.runtime.committed_revision();
@@ -240,6 +256,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         event: WebSocketMessageEvent,
     ) -> Result<WebSocketDispatch, CellError> {
         self.ensure_active()?;
+        self.last_commit = None;
         self.verify().await?;
         let dispatch = self.runtime.dispatch_websocket_message(event).await?;
         let revision = self.runtime.committed_revision();
@@ -255,6 +272,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         event: WebSocketCloseEvent,
     ) -> Result<WebSocketDispatch, CellError> {
         self.ensure_active()?;
+        self.last_commit = None;
         self.verify().await?;
         let dispatch = self.runtime.dispatch_websocket_close(event).await?;
         let revision = self.runtime.committed_revision();
@@ -267,6 +285,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
 
     pub async fn dispatch_workflow(&mut self, event: WorkflowEvent) -> Result<(), CellError> {
         self.ensure_active()?;
+        self.last_commit = None;
         self.verify().await?;
         self.runtime.dispatch_workflow(event).await?;
         let revision = self.runtime.committed_revision();
@@ -278,6 +297,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
 
     pub async fn checkpoint(&mut self) -> Result<(), CellError> {
         self.ensure_active()?;
+        self.last_commit = None;
         self.verify().await?;
         let checkpoint = self.storage.lock().await.checkpoint()?;
         if let Err(error) = self
@@ -299,6 +319,15 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         }
         self.generation = checkpoint.revision;
         self.wal_offset = 0;
+        self.last_commit = Some(CellCommitSummary {
+            revision: checkpoint.revision,
+            receipt: DurableReceipt::new(
+                self.lease.cell(),
+                self.lease.epoch(),
+                checkpoint.revision,
+                checkpoint.revision,
+            ),
+        });
         self.prune().await?;
         self.verify().await
     }
@@ -400,8 +429,15 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             return Err(CellError::InvalidReceipt);
         }
         self.wal_offset = offset;
+        self.last_commit = Some(CellCommitSummary { revision, receipt });
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CellCommitSummary {
+    pub revision: peren_primitives::StorageRevision,
+    pub receipt: DurableReceipt,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

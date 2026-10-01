@@ -764,7 +764,10 @@ async fn test_storage_inner(
     register_object(&socket.registry, &namespace, &id);
     socket
         .node
-        .restore_and_dispatch(process::object_cell(&namespace, &id), |path, lease, store| async move {
+        .restore_and_dispatch(process::object_cell(&namespace, &id), |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut storage = peren_storage::CellStorage::open(&path)
                 .map_err(peren_cell::CellError::from)?;
             let value = match action {

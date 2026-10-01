@@ -442,47 +442,47 @@ async fn dispatch_service(
     let registry = Arc::clone(&host.registry);
     let limits = host.limits;
     host.node
-        .restore_and_dispatch(
-            cell(&fetch.service, path),
-            |path, lease, store| async move {
-                let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
-                    &path,
-                    lease,
-                    store,
-                    target.bundle,
-                    isolate,
-                    target.environment,
-                    move |storage| {
-                        Arc::new(ProcessHost {
-                            inner: RoutedHost::new(
-                                storage,
-                                d1,
-                                r2,
-                                queues.clone(),
-                                cache.clone(),
-                                kv.clone(),
-                            ),
-                            node,
-                            services,
-                            objects,
-                            registry: Arc::clone(&registry),
-                            outbound_hosts: Arc::clone(&outbound_hosts),
-                            aws: Arc::clone(&target.aws),
-                            mtls: Arc::clone(&target.mtls),
-                            queues,
-                            r2_notifications: target.r2_notifications,
-                            cache,
-                            limits,
-                            telemetry: Arc::clone(&host.telemetry),
-                        })
-                    },
-                )
-                .await?;
-                let response = resident.dispatch_http(fetch.request, invocation).await?;
-                resident.release().await?;
-                Ok(response)
-            },
-        )
+        .restore_and_dispatch(cell(&fetch.service, path), |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
+            let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
+                &path,
+                lease,
+                store,
+                target.bundle,
+                isolate,
+                target.environment,
+                move |storage| {
+                    Arc::new(ProcessHost {
+                        inner: RoutedHost::new(
+                            storage,
+                            d1,
+                            r2,
+                            queues.clone(),
+                            cache.clone(),
+                            kv.clone(),
+                        ),
+                        node,
+                        services,
+                        objects,
+                        registry: Arc::clone(&registry),
+                        outbound_hosts: Arc::clone(&outbound_hosts),
+                        aws: Arc::clone(&target.aws),
+                        mtls: Arc::clone(&target.mtls),
+                        queues,
+                        r2_notifications: target.r2_notifications,
+                        cache,
+                        limits,
+                        telemetry: Arc::clone(&host.telemetry),
+                    })
+                },
+            )
+            .await?;
+            let response = resident.dispatch_http(fetch.request, invocation).await?;
+            resident.release().await?;
+            Ok(response)
+        })
         .await
         .map_err(|_| HostError)
 }
@@ -546,7 +546,10 @@ async fn dispatch_object(
     host.node
         .restore_and_dispatch(
             object_cell(&fetch.namespace, &fetch.id),
-            |path, lease, store| async move {
+            |input| async move {
+                let path = input.path;
+                let lease = input.lease;
+                let store = input.repository;
                 let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
                     &path,
                     lease,

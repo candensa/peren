@@ -40,6 +40,7 @@ async fn publication_failure_drains_and_rejects_further_dispatch() {
             .await,
         Err(CellError::Repository(RepositoryError::Unavailable))
     ));
+    assert_eq!(cell.last_commit(), None);
     assert_eq!(cell.state(), CellState::Draining);
     assert!(matches!(
         cell.dispatch_http(request("/read"), invocation()).await,
@@ -132,6 +133,7 @@ async fn read_only_dispatch_does_not_publish_a_replica() {
         .unwrap();
 
     assert_eq!(response.body, b"0");
+    assert_eq!(cell.last_commit(), None);
     assert!(published.lock().unwrap().is_none());
     cell.release().await.unwrap();
 }
@@ -187,12 +189,14 @@ async fn failed_worker_transaction_rolls_back_without_publication() {
         cell.dispatch_http(request("/fail"), invocation()).await,
         Err(CellError::Engine(_))
     ));
+    assert_eq!(cell.last_commit(), None);
     let response = cell
         .dispatch_http(request("/read"), invocation())
         .await
         .unwrap();
 
     assert_eq!(response.body, b"0");
+    assert_eq!(cell.last_commit(), None);
     assert!(published.lock().unwrap().is_none());
     cell.release().await.unwrap();
 }

@@ -629,7 +629,10 @@ async fn dispatch_cell_plain(
     dispatch: Dispatch,
 ) -> Result<DispatchResult, ProcessError> {
     app.node
-        .restore_and_dispatch(dispatch.cell, |path, lease, store| async move {
+        .restore_and_dispatch(dispatch.cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident = peren_cell::WorkerCell::activate(
                 &path,
                 lease,
@@ -668,7 +671,10 @@ async fn dispatch_cell_host(
     let limits = app.limits;
 
     app.node
-        .restore_and_dispatch(dispatch.cell, |path, lease, store| async move {
+        .restore_and_dispatch(dispatch.cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
                 &path,
                 lease,
@@ -776,7 +782,10 @@ async fn dispatch_websocket_plain(
     event: WebSocketEvent,
 ) -> Result<(WebSocketDispatch, Vec<peren_runtime::WorkerLogEvent>), ProcessError> {
     app.node
-        .restore_and_dispatch(cell, |path, lease, store| async move {
+        .restore_and_dispatch(cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident = peren_cell::WorkerCell::activate(
                 &path,
                 lease,
@@ -819,7 +828,10 @@ async fn dispatch_websocket_host(
     let limits = app.limits;
 
     app.node
-        .restore_and_dispatch(cell, |path, lease, store| async move {
+        .restore_and_dispatch(cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
                 &path,
                 lease,
