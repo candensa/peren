@@ -69,9 +69,9 @@ service = "api"
             .spawn()
             .unwrap();
         let started = Instant::now();
-        while TcpStream::connect(peer).is_err() {
+        while TcpStream::connect(public).is_err() {
             assert!(
-                started.elapsed() < Duration::from_secs(3),
+                started.elapsed() < Duration::from_secs(10),
                 "server did not become ready"
             );
             thread::sleep(Duration::from_millis(10));

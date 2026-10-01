@@ -51,6 +51,7 @@ pub(super) struct App {
     pub(super) metrics: Metrics,
     pub(super) admission: Admission,
     pub(super) socket: Option<SocketApp>,
+    pub(super) dev_inspector: bool,
 }
 
 #[derive(Clone)]
@@ -219,7 +220,28 @@ impl Process {
         config: ValidatedConfig,
         environment: &E,
     ) -> Result<Self, ProcessError> {
-        Self::start_with_listeners(config, environment, BTreeMap::new()).await
+        Self::start_with_options(
+            config,
+            environment,
+            BTreeMap::new(),
+            ProcessOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn start_development<E: Environment>(
+        config: ValidatedConfig,
+        environment: &E,
+    ) -> Result<Self, ProcessError> {
+        Self::start_with_options(
+            config,
+            environment,
+            BTreeMap::new(),
+            ProcessOptions {
+                dev_inspector: true,
+            },
+        )
+        .await
     }
 
     pub async fn start_with_listeners<E: Environment>(
@@ -227,12 +249,21 @@ impl Process {
         environment: &E,
         inherited: BTreeMap<String, std::net::TcpListener>,
     ) -> Result<Self, ProcessError> {
+        Self::start_with_options(config, environment, inherited, ProcessOptions::default()).await
+    }
+
+    async fn start_with_options<E: Environment>(
+        config: ValidatedConfig,
+        environment: &E,
+        inherited: BTreeMap<String, std::net::TcpListener>,
+        options: ProcessOptions,
+    ) -> Result<Self, ProcessError> {
         let providers = Providers::build(&config, environment).await?;
         let data = environment
             .get("PEREN_DATA_DIR")
             .map_or_else(default_data, PathBuf::from);
         let bundles = bundles(&config.raw.services, &config.raw.dispatch_namespaces)?;
-        Self::start_with_providers(config, providers, inherited, data, bundles).await
+        Self::start_with_providers(config, providers, inherited, data, bundles, options).await
     }
 
     #[allow(
@@ -245,6 +276,7 @@ impl Process {
         mut inherited: BTreeMap<String, std::net::TcpListener>,
         data: PathBuf,
         bundles: BTreeMap<String, WorkerBundle>,
+        options: ProcessOptions,
     ) -> Result<Self, ProcessError> {
         let shutdown_deadline = Duration::from_secs(config.raw.shutdown.evacuation_deadline_secs);
         reject_unknown_inherited(&config, &inherited)?;
@@ -305,6 +337,7 @@ impl Process {
                 },
                 admission: admission.clone(),
                 socket: None,
+                dev_inspector: options.dev_inspector,
             },
         ));
         let socket_services = socket_services(&control_config.raw.sockets);
@@ -340,6 +373,7 @@ impl Process {
                         telemetry: Arc::clone(&telemetry),
                     },
                     admission: admission.clone(),
+                    dev_inspector: options.dev_inspector,
                     socket: Some(socket_app(
                         SocketContext {
                             node: context.node,
@@ -397,6 +431,7 @@ impl Process {
                     },
                     admission: admission.clone(),
                     socket: None,
+                    dev_inspector: options.dev_inspector,
                 },
             ));
         }
@@ -446,6 +481,11 @@ impl Process {
         self.supervisor.shutdown(self.shutdown_deadline).await?;
         Ok(())
     }
+}
+
+#[derive(Clone, Copy, Default)]
+struct ProcessOptions {
+    dev_inspector: bool,
 }
 
 pub(crate) fn default_data() -> PathBuf {

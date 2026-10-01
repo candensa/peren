@@ -146,6 +146,27 @@ pub fn read(
     Ok(Report { events })
 }
 
+pub fn read_recent(root: &Path, limit: usize) -> Result<Report, TailError> {
+    let path = root.join(FILE);
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => return Err(TailError::Read { path, source }),
+    };
+    let complete = match text.rfind('\n') {
+        Some(end) => &text[..=end],
+        None => "",
+    };
+    let mut events = Vec::new();
+    for line in complete.lines().filter(|line| !line.trim().is_empty()) {
+        events.push(serde_json::from_str(line)?);
+    }
+    if events.len() > limit {
+        events.drain(..events.len() - limit);
+    }
+    Ok(Report { events })
+}
+
 impl Event {
     #[must_use]
     pub fn service(&self) -> &str {
@@ -300,6 +321,80 @@ mod tests {
         assert_eq!(errors.events.len(), 1);
         assert!(matches!(&errors.events[0], Event::Request(event) if event.path == "/fail"));
         assert_eq!(warnings.events.len(), 2);
+        fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn reads_recent_tail_events_without_a_service_filter() {
+        let temp = std::env::temp_dir().join(format!("peren-tail-recent-{}", Uuid::new_v4()));
+        let tail = temp.join("tail");
+        fs::create_dir_all(&tail).unwrap();
+        for index in 0..3 {
+            append(
+                &tail,
+                &Event::Request(RequestEvent {
+                    service: "api".into(),
+                    request_id: Some(format!("request-{index}")),
+                    dispatch_id: None,
+                    traceparent: None,
+                    method: "GET".into(),
+                    path: format!("/{index}"),
+                    status: 200,
+                    outcome: "ok".into(),
+                    wall_time_ms: index,
+                }),
+            )
+            .unwrap();
+        }
+
+        let recent = read_recent(&tail, 2).unwrap();
+
+        assert_eq!(recent.events.len(), 2);
+        assert!(matches!(
+            &recent.events[0],
+            Event::Request(event) if event.path == "/1"
+        ));
+        assert!(matches!(
+            &recent.events[1],
+            Event::Request(event) if event.path == "/2"
+        ));
+        fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn read_recent_ignores_an_incomplete_final_record() {
+        let temp = std::env::temp_dir().join(format!("peren-tail-partial-{}", Uuid::new_v4()));
+        let tail = temp.join("tail");
+        fs::create_dir_all(&tail).unwrap();
+        append(
+            &tail,
+            &Event::Request(RequestEvent {
+                service: "api".into(),
+                request_id: Some("request-1".into()),
+                dispatch_id: None,
+                traceparent: None,
+                method: "GET".into(),
+                path: "/complete".into(),
+                status: 200,
+                outcome: "ok".into(),
+                wall_time_ms: 1,
+            }),
+        )
+        .unwrap();
+        fs::OpenOptions::new()
+            .append(true)
+            .open(tail.join(FILE))
+            .unwrap()
+            .write_all(br#"{"kind":"request""#)
+            .unwrap();
+
+        let recent = read_recent(&tail, 10).unwrap();
+
+        assert_eq!(recent.events.len(), 1);
+        assert!(matches!(
+            &recent.events[0],
+            Event::Request(event) if event.path == "/complete"
+        ));
         fs::remove_dir_all(temp).unwrap();
     }
 

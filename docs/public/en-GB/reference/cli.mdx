@@ -160,7 +160,7 @@ peren serve fleet.toml
 
 ### `peren dev`
 
-Starts a local development session with topology printout and local environment loading.
+Starts a local development session with topology, diagnostics, live events, and local environment loading.
 
 ```sh
 peren dev <config> [--profile peren|wrangler] [--env <name>] [--wrangler <path>]… [--json]
@@ -176,15 +176,31 @@ peren dev <config> [--profile peren|wrangler] [--env <name>] [--wrangler <path>]
 
 **State.** Loads config and local env files from the config directory. The default `peren` profile reads `.dev.vars`; `--env` has no effect in this profile. The `wrangler` profile, or a command with `--wrangler` overlays and no explicit profile, reads `.dev.vars` or `.dev.vars.<env>` first. When no matching `.dev.vars` file exists, it reads `.env`, `.env.<env>`, `.env.local`, and `.env.<env>.local` in order. Wrangler tool variables with `CLOUDFLARE_`, `WRANGLER_`, or `MINIFLARE_` prefixes are not exposed to Worker code from `.env` files. Preparation forces a memory bucket and rebinds loopback listeners to port 0, then starts the process until shutdown. The file on disk is unchanged. `peren serve` keeps the configured bucket and ports.
 
+The dev process also mounts read-only inspector endpoints on each local listener. These endpoints are available only for `peren dev` and `peren test-server`, not `peren serve`.
+
+| Endpoint | Output |
+| --- | --- |
+| `/__peren/dev` | Ready state, health, topology, node id, and incarnation |
+| `/__peren/dev/topology` | Services, sockets, binding kinds, queue consumers, bucket kind, and data dir |
+| `/__peren/dev/bindings` | Binding inventory grouped by service, including non-secret target names |
+| `/__peren/dev/queues` | Queue producer and consumer wiring |
+| `/__peren/dev/objects` | Durable Object classes and resident object ids observed in this session |
+| `/__peren/dev/events?limit=100` | Recent request and console tail events |
+| `/__peren/dev/health` | Ready state, admission mode, active work, and drain counters |
+
 **Output.** Without `--json`, representative lines:
 
 ```text
 config: .
-service api worker=worker.js
+dev: source=peren env_profile=peren data=./data bucket=file
+env files: .dev.vars
+service api entrypoint=stateless worker=worker.js
+  bindings: CACHE:kv
 socket public service=api listen=127.0.0.1:8080
+info: dev uses loopback listeners with ephemeral ports and an isolated in-memory bucket
 ```
 
-Then progress and `public: http://<addr>`-style listener lines for each ready socket name. With `--json`, a pretty-printed topology object with `services`, `sockets`, and `queues`.
+Then progress, `public: http://<addr>` listener lines, and `dev inspector public: http://<addr>/__peren/dev` lines for each ready socket name. While the process runs, request and console events are printed as they are appended to the local tail log. Peren watches the config file, Worker bundle, additional modules, source maps, asset directories, and loaded local env files; when one changes, it stops the local process and starts a fresh session with reloaded config and env. With `--json`, Peren prints a pretty-printed topology object with `services`, `sockets`, `queues`, `diagnostics`, and local env file metadata, and suppresses the live terminal event feed.
 
 ```sh
 peren dev fleet.toml
