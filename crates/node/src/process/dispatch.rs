@@ -714,7 +714,7 @@ async fn dispatch_cell_plain(
                 .await?;
             let commit = resident.last_commit();
             let _ = trace_sink.record_span(
-                &trace_context.child(),
+                &trace_context,
                 SpanRecord {
                     service: &service,
                     cell: Some(&cell_id),
@@ -854,7 +854,7 @@ async fn dispatch_cell_host(
                         limits,
                         telemetry: Arc::clone(&app.telemetry),
                         trace: host_trace_sink.clone(),
-                        trace_context: Some(host_trace_context.child()),
+                        trace_context: Some(host_trace_context.clone()),
                     })
                 },
             )
@@ -866,7 +866,7 @@ async fn dispatch_cell_host(
                 .await?;
             let commit = resident.last_commit();
             let _ = trace_sink.record_span(
-                &trace_context.child(),
+                &trace_context,
                 SpanRecord {
                     service: &app.service,
                     cell: Some(&dispatch.cell.to_string()),

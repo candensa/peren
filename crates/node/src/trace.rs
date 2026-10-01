@@ -48,8 +48,12 @@ impl TraceSink {
 
     pub(crate) fn append(&self, event: Event) -> Result<(), TraceError> {
         append(&self.root, &event)?;
-        if let Some(exporter) = &self.exporter {
-            let _ = exporter.try_send(event);
+        if let Some(exporter) = &self.exporter
+            && exporter.try_send(event).is_err()
+        {
+            eprintln!(
+                "trace-otlp-exporter: dropped 1 span because the export queue is unavailable"
+            );
         }
         Ok(())
     }
@@ -446,6 +450,10 @@ async fn flush(client: &reqwest::Client, config: &Otlp, batch: &mut Vec<Event>) 
             .saturating_mul(u64::from(attempt + 1));
         time::sleep(Duration::from_millis(delay)).await;
     }
+    eprintln!(
+        "trace-otlp-exporter: dropped {} spans after retries",
+        batch.len()
+    );
     batch.clear();
 }
 
@@ -621,5 +629,31 @@ compatibility_date = "2026-01-01"
         )
         .unwrap();
         assert_eq!(report.events.len(), 1);
+    }
+
+    #[test]
+    fn dispatch_fetch_and_nested_contexts_have_expected_parentage() {
+        let dispatch = TraceContext::ingress(None, "request".into(), "dispatch".into(), 1.0);
+        let restore = dispatch.child();
+        let fetch = dispatch.child();
+        let nested_dispatch = fetch.child();
+        let nested_release = nested_dispatch.child();
+
+        assert_eq!(
+            restore.parent_span_id.as_deref(),
+            Some(dispatch.span_id.as_str())
+        );
+        assert_eq!(
+            fetch.parent_span_id.as_deref(),
+            Some(dispatch.span_id.as_str())
+        );
+        assert_eq!(
+            nested_dispatch.parent_span_id.as_deref(),
+            Some(fetch.span_id.as_str())
+        );
+        assert_eq!(
+            nested_release.parent_span_id.as_deref(),
+            Some(nested_dispatch.span_id.as_str())
+        );
     }
 }

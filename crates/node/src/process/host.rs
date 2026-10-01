@@ -156,9 +156,14 @@ fn record_lifecycle(
     let Some(context) = context else {
         return;
     };
+    let context = if name == "cell.dispatch" {
+        context.clone()
+    } else {
+        context.child()
+    };
     let cell = cell.to_string();
     let _ = trace.record_span(
-        &context.child(),
+        &context,
         SpanRecord {
             service,
             cell: Some(&cell),
@@ -433,13 +438,14 @@ impl ServiceBindingHost for ProcessHost {
         let started_at_ms = trace::now_ms();
         let service = fetch.service.clone();
         let span = self.trace_context.as_ref().map(TraceContext::child);
+        let dispatch_context = span.clone();
         let host = self.clone();
         let result = tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|_| HostError)?;
-            runtime.block_on(dispatch_service(host, fetch))
+            runtime.block_on(dispatch_service(host, fetch, dispatch_context))
         })
         .await
         .map_err(|_| HostError)?;
@@ -505,6 +511,7 @@ impl ServiceBindingHost for ProcessHost {
 async fn dispatch_service(
     host: ProcessHost,
     fetch: ServiceFetch,
+    parent_context: Option<TraceContext>,
 ) -> Result<HttpResponse, HostError> {
     let target = host.services.get(&fetch.service).ok_or(HostError)?.clone();
     let uri = fetch.request.url.parse::<Uri>().map_err(|_| HostError)?;
@@ -523,7 +530,7 @@ async fn dispatch_service(
     let registry = Arc::clone(&host.registry);
     let limits = host.limits;
     let trace = host.trace.clone();
-    let trace_context = host.trace_context.as_ref().map(TraceContext::child);
+    let trace_context = parent_context.as_ref().map(TraceContext::child);
     let service_name = fetch.service.clone();
     let cell_id = cell(&fetch.service, path);
     host.node
@@ -578,7 +585,7 @@ async fn dispatch_service(
                         limits,
                         telemetry: Arc::clone(&host.telemetry),
                         trace: host_trace.clone(),
-                        trace_context: host_trace_context.as_ref().map(TraceContext::child),
+                        trace_context: host_trace_context.clone(),
                     })
                 },
             )
@@ -648,13 +655,14 @@ impl DurableObjectHost for ProcessHost {
         let namespace = fetch.namespace.clone();
         let object_id = fetch.id.clone();
         let span = self.trace_context.as_ref().map(TraceContext::child);
+        let dispatch_context = span.clone();
         let host = self.clone();
         let result = tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|_| HostError)?;
-            runtime.block_on(dispatch_object(host, fetch))
+            runtime.block_on(dispatch_object(host, fetch, dispatch_context))
         })
         .await
         .map_err(|_| HostError)?;
@@ -727,6 +735,7 @@ impl DurableObjectHost for ProcessHost {
 async fn dispatch_object(
     host: ProcessHost,
     fetch: DurableObjectFetch,
+    parent_context: Option<TraceContext>,
 ) -> Result<HttpResponse, HostError> {
     let service = host
         .objects
@@ -749,7 +758,7 @@ async fn dispatch_object(
     let registry = Arc::clone(&host.registry);
     let limits = host.limits;
     let trace = host.trace.clone();
-    let trace_context = host.trace_context.as_ref().map(TraceContext::child);
+    let trace_context = parent_context.as_ref().map(TraceContext::child);
     let service_name = service.clone();
     let cell_id = object_cell(&fetch.namespace, &fetch.id);
     host.node
@@ -804,7 +813,7 @@ async fn dispatch_object(
                         limits,
                         telemetry: Arc::clone(&host.telemetry),
                         trace: host_trace.clone(),
-                        trace_context: host_trace_context.as_ref().map(TraceContext::child),
+                        trace_context: host_trace_context.clone(),
                     })
                 },
             )
