@@ -4,7 +4,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use object_store::{PutMode, PutOptions, PutPayload, path::Path};
+use object_store::{PutMode, PutOptions, PutPayload, UpdateVersion, path::Path};
 use peren_fleet::OwnershipRepository;
 use peren_primitives::{CellId, OwnershipEpoch, StorageRevision};
 use peren_replication::{
@@ -163,20 +163,50 @@ impl BucketStore {
 }
 impl BucketStore {
     pub(crate) async fn write_root(&self, root: ReplicaRoot) -> Result<(), ReplicaError> {
+        let key = root_key(root.cell);
         let bytes = serde_json::to_vec(&root).map_err(|_| ReplicaError::Malformed)?;
-        self.store
-            .put(&root_key(root.cell), PutPayload::from(bytes))
-            .await
-            .map_err(|_| ReplicaError::Unavailable)?;
-        Ok(())
+        for _ in 0..3 {
+            let current = self.read_root_version(root.cell).await?;
+            let Some(mode) = root_put_mode(current.as_ref(), &root)? else {
+                return Ok(());
+            };
+            let options = PutOptions {
+                mode,
+                ..PutOptions::default()
+            };
+            match self
+                .store
+                .put_opts(&key, PutPayload::from(bytes.clone()), options)
+                .await
+            {
+                Ok(_) => return Ok(()),
+                Err(
+                    object_store::Error::AlreadyExists { .. }
+                    | object_store::Error::Precondition { .. },
+                ) => {}
+                Err(_) => return Err(ReplicaError::Unavailable),
+            }
+        }
+        Err(ReplicaError::Unavailable)
     }
 
     pub(crate) async fn read_root(
         &self,
         cell: CellId,
     ) -> Result<Option<ReplicaRoot>, ReplicaError> {
+        Ok(self.read_root_version(cell).await?.map(|(root, _)| root))
+    }
+
+    async fn read_root_version(
+        &self,
+        cell: CellId,
+    ) -> Result<Option<(ReplicaRoot, UpdateVersion)>, ReplicaError> {
         match self.store.get(&root_key(cell)).await {
             Ok(result) => {
+                let version = UpdateVersion {
+                    e_tag: result.meta.e_tag.clone(),
+                    version: result.meta.version.clone(),
+                };
                 let bytes = result
                     .bytes()
                     .await
@@ -184,7 +214,7 @@ impl BucketStore {
                 let root: ReplicaRoot =
                     serde_json::from_slice(&bytes).map_err(|_| ReplicaError::Malformed)?;
                 if root.cell == cell {
-                    Ok(Some(root))
+                    Ok(Some((root, version)))
                 } else {
                     Err(ReplicaError::Malformed)
                 }
@@ -257,9 +287,21 @@ impl BucketStore {
             ..ReplicaPruneReport::default()
         };
         for (key, size) in candidates {
-            if reachable.contains(&key) {
+            if reachable.contains(&key) || replica_object_is_newer_than_root(cell, &key, &root) {
                 report.objects_retained += 1;
                 continue;
+            }
+            if !dry_run {
+                let Some(current_root) = self.read_root(cell).await? else {
+                    report.objects_retained += 1;
+                    continue;
+                };
+                if root_reachable(&current_root).contains(&key)
+                    || replica_object_is_newer_than_root(cell, &key, &current_root)
+                {
+                    report.objects_retained += 1;
+                    continue;
+                }
             }
             report.objects_removed += 1;
             report.bytes_removed = report.bytes_removed.saturating_add(size);
@@ -534,6 +576,31 @@ fn root_key(cell: CellId) -> Path {
     Path::from(format!("cells/{cell}/root.json"))
 }
 
+fn root_put_mode(
+    current: Option<&(ReplicaRoot, UpdateVersion)>,
+    next: &ReplicaRoot,
+) -> Result<Option<PutMode>, ReplicaError> {
+    let Some((root, version)) = current else {
+        return Ok(Some(PutMode::Create));
+    };
+    if root.cell != next.cell {
+        return Err(ReplicaError::Malformed);
+    }
+    if root.epoch > next.epoch {
+        return Ok(None);
+    }
+    if root.epoch == next.epoch && root.revision > next.revision {
+        return Ok(None);
+    }
+    if root.epoch == next.epoch
+        && root.generation == next.generation
+        && root.revision >= next.revision
+    {
+        return Ok(None);
+    }
+    Ok(Some(PutMode::Update(version.clone())))
+}
+
 fn root_reachable(root: &ReplicaRoot) -> BTreeSet<Path> {
     let mut reachable = BTreeSet::from([
         snapshot_key(root.cell, root.epoch, root.generation),
@@ -546,6 +613,20 @@ fn root_reachable(root: &ReplicaRoot) -> BTreeSet<Path> {
         reachable.insert(wal_key(root.cell, root.epoch, *revision));
     }
     reachable
+}
+
+fn replica_object_is_newer_than_root(cell: CellId, key: &Path, root: &ReplicaRoot) -> bool {
+    let Some(object) = ReplicaObject::parse(cell, key.as_ref()) else {
+        return true;
+    };
+    match object {
+        ReplicaObject::Snapshot { epoch, revision }
+        | ReplicaObject::Wal { epoch, revision }
+        | ReplicaObject::WalGeneration { epoch, revision } => {
+            epoch > root.epoch || (epoch == root.epoch && revision > root.revision)
+        }
+        ReplicaObject::WalHeader { epoch } => epoch >= root.epoch,
+    }
 }
 
 fn parse_root_cell(key: &str) -> Option<CellId> {
@@ -569,6 +650,65 @@ fn hex_value(byte: u8) -> Option<u8> {
         b'A'..=b'F' => Some(byte - b'A' + 10),
         _ => None,
     }
+}
+
+enum ReplicaObject {
+    Snapshot {
+        epoch: OwnershipEpoch,
+        revision: StorageRevision,
+    },
+    Wal {
+        epoch: OwnershipEpoch,
+        revision: StorageRevision,
+    },
+    WalHeader {
+        epoch: OwnershipEpoch,
+    },
+    WalGeneration {
+        epoch: OwnershipEpoch,
+        revision: StorageRevision,
+    },
+}
+
+impl ReplicaObject {
+    fn parse(cell: CellId, key: &str) -> Option<Self> {
+        if let Some((epoch, revision)) = parse_revision_key(cell, "snapshot", ".sqlite", key) {
+            return Some(Self::Snapshot { epoch, revision });
+        }
+        if let Some((epoch, revision)) = parse_revision_key(cell, "wal", ".bin", key) {
+            return Some(Self::Wal { epoch, revision });
+        }
+        if let Some((epoch, revision)) = parse_revision_key(cell, "wal-header", ".bin", key) {
+            return Some(Self::WalGeneration { epoch, revision });
+        }
+        let prefix = format!("cells/{cell}/wal-header/e");
+        let epoch = key.strip_prefix(&prefix)?.strip_suffix(".bin")?;
+        if epoch.contains('/') || !epoch.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        Some(Self::WalHeader {
+            epoch: OwnershipEpoch::new(epoch.parse().ok()?),
+        })
+    }
+}
+
+fn parse_revision_key(
+    cell: CellId,
+    directory: &str,
+    extension: &str,
+    key: &str,
+) -> Option<(OwnershipEpoch, StorageRevision)> {
+    let prefix = format!("cells/{cell}/{directory}/e");
+    let remainder = key.strip_prefix(&prefix)?;
+    let (epoch, filename) = remainder.split_once('/')?;
+    let sequence = filename.strip_suffix(extension)?;
+    if sequence.len() != 20 || !sequence.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some((
+        OwnershipEpoch::new(epoch.parse().ok()?),
+        StorageRevision::new(sequence.parse().ok()?),
+    ))
 }
 
 pub(crate) fn snapshot_key(cell: CellId, epoch: OwnershipEpoch, revision: StorageRevision) -> Path {

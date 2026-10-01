@@ -142,6 +142,43 @@ async fn checkpoint_threshold_collapses_published_wal() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn checkpoint_threshold_uses_wal_bytes_since_generation() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cell.sqlite");
+    let repository = repository(false);
+    let prunes = Arc::clone(&repository.prunes);
+    let mut cell = WorkerCell::activate(
+        &path,
+        lease(usize::MAX),
+        repository,
+        counter_bundle(),
+        isolate(),
+        WorkerEnvironment::empty(),
+    )
+    .await
+    .unwrap();
+
+    cell.dispatch_http(request("/increment"), invocation())
+        .await
+        .unwrap();
+    let first_wal_bytes = cell.last_commit().unwrap().wal_bytes;
+    cell.checkpoint_if_wal_exceeds(u64::try_from(first_wal_bytes).unwrap().saturating_add(1))
+        .await
+        .unwrap();
+    assert_eq!(prunes.load(Ordering::SeqCst), 0);
+
+    cell.dispatch_http(request("/increment"), invocation())
+        .await
+        .unwrap();
+    cell.checkpoint_if_wal_exceeds(u64::try_from(first_wal_bytes).unwrap().saturating_add(1))
+        .await
+        .unwrap();
+    assert_eq!(cell.last_commit().unwrap().wal_bytes, 0);
+    assert_eq!(prunes.load(Ordering::SeqCst), 1);
+    cell.release().await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn read_only_dispatch_does_not_publish_a_replica() {
     let repository = repository(false);
     let published = Arc::clone(&repository.image);

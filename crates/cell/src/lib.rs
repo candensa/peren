@@ -31,6 +31,7 @@ pub struct WorkerCell<L, R> {
     replicator: Replicator<R>,
     runtime: WorkerRuntime,
     wal_offset: u64,
+    wal_bytes_since_generation: u64,
     generation: peren_primitives::StorageRevision,
     last_commit: Option<CellCommitSummary>,
     state: CellState,
@@ -83,6 +84,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             replicator: Replicator::new(repository),
             runtime,
             wal_offset: 0,
+            wal_bytes_since_generation: 0,
             generation: peren_primitives::StorageRevision::default(),
             last_commit: None,
             state: CellState::Active,
@@ -112,6 +114,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             replicator: Replicator::new(repository),
             runtime,
             wal_offset: 0,
+            wal_bytes_since_generation: 0,
             generation: peren_primitives::StorageRevision::default(),
             last_commit: None,
             state: CellState::Active,
@@ -165,6 +168,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             replicator: Replicator::new(repository),
             runtime,
             wal_offset: 0,
+            wal_bytes_since_generation: 0,
             generation: peren_primitives::StorageRevision::default(),
             last_commit: None,
             state: CellState::Active,
@@ -319,6 +323,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         }
         self.generation = checkpoint.revision;
         self.wal_offset = 0;
+        self.wal_bytes_since_generation = 0;
         self.last_commit = Some(CellCommitSummary {
             revision: checkpoint.revision,
             receipt: DurableReceipt::new(
@@ -340,10 +345,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         if threshold_bytes == 0 {
             return Ok(());
         }
-        let Some(commit) = self.last_commit else {
-            return Ok(());
-        };
-        if u64::try_from(commit.wal_bytes).unwrap_or(u64::MAX) >= threshold_bytes {
+        if self.wal_bytes_since_generation >= threshold_bytes {
             self.checkpoint().await?;
         }
         Ok(())
@@ -447,6 +449,9 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             return Err(CellError::InvalidReceipt);
         }
         self.wal_offset = offset;
+        self.wal_bytes_since_generation = self
+            .wal_bytes_since_generation
+            .saturating_add(u64::try_from(wal_bytes).unwrap_or(u64::MAX));
         self.last_commit = Some(CellCommitSummary {
             revision,
             receipt,
