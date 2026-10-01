@@ -60,7 +60,7 @@ async fn start_with_inherited(
 }
 
 pub(super) async fn dev(command: cli::Worker) -> Result<(), CliError> {
-    let session = Session::load(&command.config, &command.wrangler)?;
+    let session = Session::load(&command)?;
     session.print_topology(command.json)?;
     let config = prepare_test_server(session.raw)?;
     let progress = Progress::start(Style::Dots, "Starting local Peren");
@@ -78,7 +78,7 @@ pub(super) async fn dev(command: cli::Worker) -> Result<(), CliError> {
 }
 
 pub(super) async fn test(command: cli::Worker) -> Result<(), CliError> {
-    let session = Session::load(&command.config, &command.wrangler)?;
+    let session = Session::load(&command)?;
     let topology = session.topology();
     let config = prepare_test_server(session.raw)?;
     let process = Process::start(config, &session.environment).await?;

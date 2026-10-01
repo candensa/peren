@@ -171,8 +171,18 @@ pub struct Worker {
     pub config: PathBuf,
     #[arg(long)]
     pub wrangler: Vec<PathBuf>,
+    #[arg(long, value_enum)]
+    pub profile: Option<DevProfile>,
+    #[arg(long = "env")]
+    pub environment: Option<String>,
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum DevProfile {
+    Peren,
+    Wrangler,
 }
 
 #[derive(Clone, Debug)]

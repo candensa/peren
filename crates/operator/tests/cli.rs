@@ -51,6 +51,24 @@ fn parses_node_and_process_commands() {
         ],
         &["peren", "logs", "fleet.toml", "--service", "api"],
         &["peren", "serve", "fleet.toml", "--socket-fd", "public=3"],
+        &[
+            "peren",
+            "dev",
+            "wrangler.toml",
+            "--profile",
+            "wrangler",
+            "--env",
+            "preview",
+        ],
+        &[
+            "peren",
+            "test-server",
+            "fleet.toml",
+            "--wrangler",
+            "wrangler.toml",
+            "--env",
+            "preview",
+        ],
     ] {
         parses(args);
     }

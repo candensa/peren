@@ -1,13 +1,16 @@
 use std::path::{Path, PathBuf};
 
-use peren_config::{Binding, FleetConfig, Service};
+use peren_config::{Binding, FleetConfig, Service, Socket};
+use peren_migrate::Source;
 use serde::Serialize;
 
-use super::devvars::DevEnvironment;
+use crate::cli;
+
+use super::devvars::{LocalDevEnvironment, LocalEnvProfile};
 
 pub(super) struct Session {
     pub(super) raw: FleetConfig,
-    pub(super) environment: DevEnvironment,
+    pub(super) environment: LocalDevEnvironment,
     base: PathBuf,
 }
 
@@ -39,15 +42,32 @@ pub(super) struct QueueView {
 }
 
 impl Session {
-    pub(super) fn load(config: &Path, wrangler: &[PathBuf]) -> Result<Self, super::CliError> {
-        let imported = peren_migrate::load_raw(config, wrangler)?;
+    pub(super) fn load(command: &cli::Worker) -> Result<Self, super::CliError> {
+        let source_profile = source_profile(command);
+        let env_profile = env_profile(command);
+        let imported = match source_profile {
+            SourceProfile::Peren => peren_migrate::load_raw(&command.config, &command.wrangler)?,
+            SourceProfile::Wrangler => {
+                if !command.wrangler.is_empty() {
+                    return Err(super::CliError::Unsupported(
+                        "--profile wrangler does not accept --wrangler overlays",
+                    ));
+                }
+                load_wrangler_config(&command.config)?
+            }
+        };
         super::emit_notices(imported.notices);
-        let base = config
+        let base = command
+            .config
             .parent()
             .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         let mut raw = imported.value;
         resolve_paths(&mut raw, &base);
-        let environment = DevEnvironment::load(config)?;
+        let environment = LocalDevEnvironment::load(
+            &command.config,
+            env_profile,
+            command.environment.as_deref(),
+        )?;
         Ok(Self {
             raw,
             environment,
@@ -119,6 +139,72 @@ impl Session {
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Copy)]
+enum SourceProfile {
+    Peren,
+    Wrangler,
+}
+
+fn source_profile(command: &cli::Worker) -> SourceProfile {
+    match command.profile {
+        Some(cli::DevProfile::Wrangler) => SourceProfile::Wrangler,
+        Some(cli::DevProfile::Peren) | None => SourceProfile::Peren,
+    }
+}
+
+fn env_profile(command: &cli::Worker) -> LocalEnvProfile {
+    match command.profile {
+        Some(cli::DevProfile::Peren) => LocalEnvProfile::Peren,
+        None if command.wrangler.is_empty() => LocalEnvProfile::Peren,
+        Some(cli::DevProfile::Wrangler) | None => LocalEnvProfile::Wrangler,
+    }
+}
+
+fn load_wrangler_config(
+    config: &Path,
+) -> Result<peren_migrate::Imported<FleetConfig>, peren_migrate::CommandError> {
+    let receipt = peren_migrate::run(peren_migrate::Command {
+        source: config.to_path_buf(),
+        output: None,
+        format: Some(Source::Wrangler),
+        compatibility_date: None,
+    })?;
+    let source = format!(
+        "{}\n{}",
+        local_dev_fleet_prelude(),
+        receipt.stdout.unwrap_or_default()
+    );
+    let mut value = FleetConfig::from_toml(&source)?;
+    if value.sockets.is_empty() && value.services.len() == 1 {
+        value.sockets.push(Socket {
+            name: "public".to_string(),
+            listen: "127.0.0.1:8080".to_string(),
+            service: value.services[0].name.clone(),
+        });
+    }
+    Ok(peren_migrate::Imported {
+        value,
+        notices: receipt.notices,
+    })
+}
+
+fn local_dev_fleet_prelude() -> &'static str {
+    r#"
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "ca.pem"
+leaf_cert_path = "leaf.pem"
+leaf_key_path = "leaf.key"
+"#
 }
 
 fn service_view(service: &Service) -> ServiceView {
@@ -224,6 +310,10 @@ fn absolutize(path: &mut PathBuf, base: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn resolves_topology_paths_relative_to_config() {
@@ -271,5 +361,59 @@ service = "api"
             config.services[0].worker_bundle_path,
             base.join("src/worker.js")
         );
+    }
+
+    #[test]
+    fn wrangler_profile_adds_default_dev_socket_for_single_service() {
+        let temp = temp_dir();
+        let wrangler = temp.join("wrangler.toml");
+        fs::write(
+            &wrangler,
+            r#"
+name = "api"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+"#,
+        )
+        .unwrap();
+
+        let imported = load_wrangler_config(&wrangler).unwrap();
+
+        assert_eq!(imported.value.services.len(), 1);
+        assert_eq!(imported.value.sockets.len(), 1);
+        assert_eq!(imported.value.sockets[0].name, "public");
+        assert_eq!(imported.value.sockets[0].service, "api");
+    }
+
+    #[test]
+    fn wrangler_profile_rejects_overlay_configs() {
+        let command = cli::Worker {
+            config: PathBuf::from("wrangler.toml"),
+            wrangler: vec![PathBuf::from("overlay.toml")],
+            profile: Some(cli::DevProfile::Wrangler),
+            environment: None,
+            json: false,
+        };
+
+        let error = match Session::load(&command) {
+            Ok(_) => panic!("expected --profile wrangler with overlays to fail"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(error.contains("--profile wrangler does not accept --wrangler overlays"));
+    }
+
+    fn temp_dir() -> PathBuf {
+        for attempt in 0..100 {
+            let name = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("peren-develop-{name}-{attempt}"));
+            if fs::create_dir(&path).is_ok() {
+                return path;
+            }
+        }
+        panic!("failed to create temporary develop directory");
     }
 }
