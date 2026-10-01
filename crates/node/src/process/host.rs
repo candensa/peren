@@ -27,6 +27,7 @@ use crate::{
         AwsBinding, Limits, ObjectRegistry, QueueBrokerState, R2NotificationRule, ServiceTarget,
         turso_routes,
     },
+    trace::{self, SpanKind, SpanRecord, TraceContext, TraceSink},
 };
 
 #[derive(Clone)]
@@ -44,6 +45,8 @@ pub(super) struct ProcessHost {
     pub(super) cache: CacheStore,
     pub(super) limits: Limits,
     pub(super) telemetry: Arc<Telemetry>,
+    pub(super) trace: TraceSink,
+    pub(super) trace_context: Option<TraceContext>,
 }
 
 impl ProcessHost {
@@ -133,6 +136,45 @@ fn r2_event_name(event: R2EventType) -> &'static str {
         R2EventType::ObjectCreate => "object_create",
         R2EventType::ObjectDelete => "object_delete",
     }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "host lifecycle spans keep trace context, cell identity and span details explicit at call sites"
+)]
+fn record_lifecycle(
+    trace: &TraceSink,
+    context: Option<&TraceContext>,
+    service: &str,
+    cell: CellId,
+    name: &str,
+    kind: SpanKind,
+    started: Instant,
+    outcome: &str,
+    attributes: BTreeMap<String, String>,
+) {
+    let Some(context) = context else {
+        return;
+    };
+    let context = if name == "cell.dispatch" {
+        context.clone()
+    } else {
+        context.child()
+    };
+    let cell = cell.to_string();
+    let _ = trace.record_span(
+        &context,
+        SpanRecord {
+            service,
+            cell: Some(&cell),
+            name,
+            kind,
+            started,
+            started_at_ms: trace::now_ms(),
+            outcome,
+            attributes,
+        },
+    );
 }
 
 #[async_trait::async_trait]
@@ -393,13 +435,17 @@ fn request_host(url: &reqwest::Url) -> Option<String> {
 impl ServiceBindingHost for ProcessHost {
     async fn fetch(&self, fetch: ServiceFetch) -> Result<HttpResponse, HostError> {
         let started = Instant::now();
+        let started_at_ms = trace::now_ms();
+        let service = fetch.service.clone();
+        let span = self.trace_context.as_ref().map(TraceContext::child);
+        let dispatch_context = span.clone();
         let host = self.clone();
         let result = tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|_| HostError)?;
-            runtime.block_on(dispatch_service(host, fetch))
+            runtime.block_on(dispatch_service(host, fetch, dispatch_context))
         })
         .await
         .map_err(|_| HostError)?;
@@ -411,19 +457,61 @@ impl ServiceBindingHost for ProcessHost {
         match result {
             Ok(response) => {
                 Telemetry::inc(&self.telemetry.service_fetches);
+                if let Some(span) = span.as_ref() {
+                    let _ = self.trace.record_span(
+                        span,
+                        SpanRecord {
+                            service: &service,
+                            cell: None,
+                            name: "service.fetch",
+                            kind: SpanKind::Client,
+                            started,
+                            started_at_ms,
+                            outcome: if response.status >= 500 {
+                                "error"
+                            } else {
+                                "ok"
+                            },
+                            attributes: BTreeMap::from([(
+                                "http.response.status_code".into(),
+                                response.status.to_string(),
+                            )]),
+                        },
+                    );
+                }
                 Ok(response)
             }
             Err(error) => {
                 Telemetry::inc(&self.telemetry.service_errors);
+                if let Some(span) = span.as_ref() {
+                    let _ = self.trace.record_span(
+                        span,
+                        SpanRecord {
+                            service: &service,
+                            cell: None,
+                            name: "service.fetch",
+                            kind: SpanKind::Client,
+                            started,
+                            started_at_ms,
+                            outcome: "error",
+                            attributes: BTreeMap::new(),
+                        },
+                    );
+                }
                 Err(error)
             }
         }
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "service binding dispatch wires target capabilities and child lifecycle trace points together"
+)]
 async fn dispatch_service(
     host: ProcessHost,
     fetch: ServiceFetch,
+    parent_context: Option<TraceContext>,
 ) -> Result<HttpResponse, HostError> {
     let target = host.services.get(&fetch.service).ok_or(HostError)?.clone();
     let uri = fetch.request.url.parse::<Uri>().map_err(|_| HostError)?;
@@ -441,11 +529,32 @@ async fn dispatch_service(
     let node = host.node.clone();
     let registry = Arc::clone(&host.registry);
     let limits = host.limits;
+    let trace = host.trace.clone();
+    let trace_context = parent_context.as_ref().map(TraceContext::child);
+    let service_name = fetch.service.clone();
+    let cell_id = cell(&fetch.service, path);
     host.node
-        .restore_and_dispatch(cell(&fetch.service, path), |input| async move {
+        .restore_and_dispatch(cell_id, |input| async move {
+            let restore_source = match &input.restore.source {
+                crate::RestoreSource::Empty => "empty".to_string(),
+                crate::RestoreSource::Restored { .. } => "restored".to_string(),
+            };
+            record_lifecycle(
+                &trace,
+                trace_context.as_ref(),
+                &service_name,
+                cell_id,
+                "cell.restore",
+                SpanKind::Internal,
+                Instant::now(),
+                "ok",
+                BTreeMap::from([("peren.restore.source".into(), restore_source)]),
+            );
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
+            let host_trace = trace.clone();
+            let host_trace_context = trace_context.clone();
             let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
                 &path,
                 lease,
@@ -475,12 +584,62 @@ async fn dispatch_service(
                         cache,
                         limits,
                         telemetry: Arc::clone(&host.telemetry),
+                        trace: host_trace.clone(),
+                        trace_context: host_trace_context.clone(),
                     })
                 },
             )
             .await?;
+            let dispatch_started = Instant::now();
             let response = resident.dispatch_http(fetch.request, invocation).await?;
+            let commit = resident.last_commit();
+            record_lifecycle(
+                &trace,
+                trace_context.as_ref(),
+                &service_name,
+                cell_id,
+                "cell.dispatch",
+                SpanKind::Server,
+                dispatch_started,
+                if response.status >= 500 {
+                    "error"
+                } else {
+                    "ok"
+                },
+                BTreeMap::from([(
+                    "http.response.status_code".into(),
+                    response.status.to_string(),
+                )]),
+            );
+            if let Some(commit) = commit {
+                record_lifecycle(
+                    &trace,
+                    trace_context.as_ref(),
+                    &service_name,
+                    cell_id,
+                    "cell.commit",
+                    SpanKind::Internal,
+                    Instant::now(),
+                    "ok",
+                    BTreeMap::from([(
+                        "peren.storage.revision".into(),
+                        commit.revision.get().to_string(),
+                    )]),
+                );
+            }
+            let release_started = Instant::now();
             resident.release().await?;
+            record_lifecycle(
+                &trace,
+                trace_context.as_ref(),
+                &service_name,
+                cell_id,
+                "cell.release",
+                SpanKind::Internal,
+                release_started,
+                "ok",
+                BTreeMap::new(),
+            );
             Ok(response)
         })
         .await
@@ -491,13 +650,19 @@ async fn dispatch_service(
 impl DurableObjectHost for ProcessHost {
     async fn fetch(&self, fetch: DurableObjectFetch) -> Result<HttpResponse, HostError> {
         let started = Instant::now();
+        let started_at_ms = trace::now_ms();
+        let class_name = fetch.class_name.clone();
+        let namespace = fetch.namespace.clone();
+        let object_id = fetch.id.clone();
+        let span = self.trace_context.as_ref().map(TraceContext::child);
+        let dispatch_context = span.clone();
         let host = self.clone();
         let result = tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .map_err(|_| HostError)?;
-            runtime.block_on(dispatch_object(host, fetch))
+            runtime.block_on(dispatch_object(host, fetch, dispatch_context))
         })
         .await
         .map_err(|_| HostError)?;
@@ -509,19 +674,68 @@ impl DurableObjectHost for ProcessHost {
         match result {
             Ok(response) => {
                 Telemetry::inc(&self.telemetry.object_fetches);
+                if let Some(span) = span.as_ref() {
+                    let _ = self.trace.record_span(
+                        span,
+                        SpanRecord {
+                            service: &class_name,
+                            cell: Some(&object_cell(&namespace, &object_id).to_string()),
+                            name: "durable_object.fetch",
+                            kind: SpanKind::Client,
+                            started,
+                            started_at_ms,
+                            outcome: if response.status >= 500 {
+                                "error"
+                            } else {
+                                "ok"
+                            },
+                            attributes: BTreeMap::from([
+                                ("peren.do.class".into(), class_name.clone()),
+                                ("peren.do.namespace".into(), namespace.clone()),
+                                (
+                                    "http.response.status_code".into(),
+                                    response.status.to_string(),
+                                ),
+                            ]),
+                        },
+                    );
+                }
                 Ok(response)
             }
             Err(error) => {
                 Telemetry::inc(&self.telemetry.object_errors);
+                if let Some(span) = span.as_ref() {
+                    let _ = self.trace.record_span(
+                        span,
+                        SpanRecord {
+                            service: &class_name,
+                            cell: Some(&object_cell(&namespace, &object_id).to_string()),
+                            name: "durable_object.fetch",
+                            kind: SpanKind::Client,
+                            started,
+                            started_at_ms,
+                            outcome: "error",
+                            attributes: BTreeMap::from([
+                                ("peren.do.class".into(), class_name.clone()),
+                                ("peren.do.namespace".into(), namespace.clone()),
+                            ]),
+                        },
+                    );
+                }
                 Err(error)
             }
         }
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "durable object dispatch wires target capabilities and child lifecycle trace points together"
+)]
 async fn dispatch_object(
     host: ProcessHost,
     fetch: DurableObjectFetch,
+    parent_context: Option<TraceContext>,
 ) -> Result<HttpResponse, HostError> {
     let service = host
         .objects
@@ -543,52 +757,123 @@ async fn dispatch_object(
     let node = host.node.clone();
     let registry = Arc::clone(&host.registry);
     let limits = host.limits;
+    let trace = host.trace.clone();
+    let trace_context = parent_context.as_ref().map(TraceContext::child);
+    let service_name = service.clone();
+    let cell_id = object_cell(&fetch.namespace, &fetch.id);
     host.node
-        .restore_and_dispatch(
-            object_cell(&fetch.namespace, &fetch.id),
-            |input| async move {
-                let path = input.path;
-                let lease = input.lease;
-                let store = input.repository;
-                let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
-                    &path,
-                    lease,
-                    store,
-                    target.bundle,
-                    isolate,
-                    target.environment,
-                    move |storage| {
-                        Arc::new(ProcessHost {
-                            inner: RoutedHost::new(
-                                storage,
-                                d1,
-                                r2,
-                                queues.clone(),
-                                cache.clone(),
-                                kv.clone(),
-                            ),
-                            node,
-                            services,
-                            objects,
-                            registry: Arc::clone(&registry),
-                            outbound_hosts: Arc::clone(&outbound_hosts),
-                            aws: Arc::clone(&target.aws),
-                            mtls: Arc::clone(&target.mtls),
-                            queues,
-                            r2_notifications: target.r2_notifications,
-                            cache,
-                            limits,
-                            telemetry: Arc::clone(&host.telemetry),
-                        })
-                    },
-                )
-                .await?;
-                resident.bind_durable_class(&fetch.class_name)?;
-                let response = resident.dispatch_http(fetch.request, invocation).await?;
-                resident.release().await?;
-                Ok(response)
-            },
-        )
+        .restore_and_dispatch(cell_id, |input| async move {
+            let restore_source = match &input.restore.source {
+                crate::RestoreSource::Empty => "empty".to_string(),
+                crate::RestoreSource::Restored { .. } => "restored".to_string(),
+            };
+            record_lifecycle(
+                &trace,
+                trace_context.as_ref(),
+                &service_name,
+                cell_id,
+                "cell.restore",
+                SpanKind::Internal,
+                Instant::now(),
+                "ok",
+                BTreeMap::from([("peren.restore.source".into(), restore_source)]),
+            );
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
+            let host_trace = trace.clone();
+            let host_trace_context = trace_context.clone();
+            let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
+                &path,
+                lease,
+                store,
+                target.bundle,
+                isolate,
+                target.environment,
+                move |storage| {
+                    Arc::new(ProcessHost {
+                        inner: RoutedHost::new(
+                            storage,
+                            d1,
+                            r2,
+                            queues.clone(),
+                            cache.clone(),
+                            kv.clone(),
+                        ),
+                        node,
+                        services,
+                        objects,
+                        registry: Arc::clone(&registry),
+                        outbound_hosts: Arc::clone(&outbound_hosts),
+                        aws: Arc::clone(&target.aws),
+                        mtls: Arc::clone(&target.mtls),
+                        queues,
+                        r2_notifications: target.r2_notifications,
+                        cache,
+                        limits,
+                        telemetry: Arc::clone(&host.telemetry),
+                        trace: host_trace.clone(),
+                        trace_context: host_trace_context.clone(),
+                    })
+                },
+            )
+            .await?;
+            resident.bind_durable_class(&fetch.class_name)?;
+            let dispatch_started = Instant::now();
+            let response = resident.dispatch_http(fetch.request, invocation).await?;
+            let commit = resident.last_commit();
+            record_lifecycle(
+                &trace,
+                trace_context.as_ref(),
+                &service_name,
+                cell_id,
+                "cell.dispatch",
+                SpanKind::Server,
+                dispatch_started,
+                if response.status >= 500 {
+                    "error"
+                } else {
+                    "ok"
+                },
+                BTreeMap::from([
+                    ("peren.do.class".into(), fetch.class_name.clone()),
+                    (
+                        "http.response.status_code".into(),
+                        response.status.to_string(),
+                    ),
+                ]),
+            );
+            if let Some(commit) = commit {
+                record_lifecycle(
+                    &trace,
+                    trace_context.as_ref(),
+                    &service_name,
+                    cell_id,
+                    "cell.commit",
+                    SpanKind::Internal,
+                    Instant::now(),
+                    "ok",
+                    BTreeMap::from([(
+                        "peren.storage.revision".into(),
+                        commit.revision.get().to_string(),
+                    )]),
+                );
+            }
+            let release_started = Instant::now();
+            resident.release().await?;
+            record_lifecycle(
+                &trace,
+                trace_context.as_ref(),
+                &service_name,
+                cell_id,
+                "cell.release",
+                SpanKind::Internal,
+                release_started,
+                "ok",
+                BTreeMap::new(),
+            );
+            Ok(response)
+        })
         .await
         .map_err(|_| HostError)
 }

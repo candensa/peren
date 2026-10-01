@@ -34,6 +34,7 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Uninstall(command) => backup::uninstall(command)?,
         Command::Upgrade { command } => upgrade::run(command).await?,
         Command::Logs(command) | Command::Tail(command) => tail::run(command)?,
+        Command::Trace(command) => trace::run(command)?,
         Command::Tenant { command } => tenant::run(command)?,
         Command::Secrets { command } => secret::run(command)?,
         Command::Workflow { command } => workflow::run(command)?,
@@ -84,6 +85,8 @@ pub enum CliError {
     Tenant(#[from] peren_node::TenantError),
     #[error(transparent)]
     Tail(#[from] peren_node::TailError),
+    #[error(transparent)]
+    Trace(#[from] peren_node::TraceError),
     #[error(transparent)]
     Workflow(#[from] peren_node::WorkflowError),
     #[error(transparent)]
@@ -212,6 +215,7 @@ mod secret;
 mod server;
 mod tail;
 mod tenant;
+mod trace;
 mod upgrade;
 mod workflow;
 

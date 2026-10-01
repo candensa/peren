@@ -3,7 +3,7 @@ title: "Configuration reference"
 description: "Fleet TOML fields, defaults, validation, and what each setting changes at startup or runtime."
 ---
 
-Peren reads one fleet TOML file before listeners open. This page is the schema: every section, key, type, default, environment variable, validation rule, and when a restart is required. Validation runs at load. Missing required fields, invalid addresses, unsupported exporters, and credential combinations that fail validation refuse startup.
+Peren reads one fleet TOML file before listeners open. This page is the schema: every section, key, type, default, environment variable, validation rule, and when a restart is required. Validation runs at load. Missing required fields, invalid addresses, unsupported export settings, and credential combinations that fail validation refuse startup.
 
 There is no `[fleet]`, `[bindings]`, `[tls]`, `[providers]`, or `[storage]` table. Bindings live under `[services.bindings.NAME]` with `type = "..."`.
 
@@ -265,7 +265,6 @@ These tables parse into the config model. Validation refuses them in this build:
 
 | Path | Validation message |
 | --- | --- |
-| `[otlp]` | OTLP export is not implemented in this build |
 | `[logpush]` | Logpush export is not implemented in this build |
 
 Remove the table to pass validation.
@@ -586,6 +585,35 @@ Optional table. Restart the process after you change it.
 | Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
 | --- | --- | --- | --- | --- | --- | --- |
 | `tracing.sampling_ratio` | number | no | `1.0` | `0` through `1` inclusive | validation | outside that range fails validation |
+
+Sampled traces are written locally under `${PEREN_DATA_DIR}/traces/events.jsonl`. The active file rotates at 64 MiB, and Peren keeps one previous segment at `events.jsonl.1`. Use `peren trace` to read the retained local events.
+
+## `[otlp]`
+
+Optional table. Enables best-effort OTLP HTTP trace export. Local trace JSONL is still written when export is configured. Restart the process after you change this table.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `otlp.endpoint` | string | yes | none | `http://` or `https://` OTLP traces endpoint | trace exporter | missing, empty, or non-HTTP(S) fails validation |
+| `otlp.service_name` | string | no | `peren-node` | non-empty string | OTLP resource attribute | accepted in config |
+| `otlp.channel_capacity` | usize | no | `1024` | at least `1` | exporter queue | `0` fails validation |
+| `otlp.batch_max_spans` | usize | no | `128` | at least `1` | exporter batch size | `0` fails validation |
+| `otlp.flush_interval_secs` | u64 | no | `5` | at least `1` | exporter flush timer | `0` fails validation |
+| `otlp.max_retries` | u32 | no | `3` | non-negative integer | exporter retry loop | type errors fail parse |
+| `otlp.retry_base_delay_ms` | u64 | no | `200` | non-negative integer | exporter retry backoff | type errors fail parse |
+| `otlp.request_timeout_secs` | u64 | no | `10` | at least `1` | exporter HTTP timeout | `0` fails validation |
+| `otlp.headers` | map string to string | no | `{}` | HTTP header names and values | exporter HTTP request | type errors fail parse |
+
+```toml
+[tracing]
+sampling_ratio = 1.0
+
+[otlp]
+endpoint = "https://collector.example.com/v1/traces"
+service_name = "peren-node"
+batch_max_spans = 128
+flush_interval_secs = 5
+```
 
 ## `[containers]`
 

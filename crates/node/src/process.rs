@@ -23,6 +23,7 @@ use crate::{
     bundle,
     host::{CacheStore, KvStore},
     metrics::{Metrics, Telemetry, now_ms},
+    trace,
     websocket::Registry as WebSocketRegistry,
 };
 
@@ -59,6 +60,7 @@ pub(super) struct SocketApp {
     pub(super) service: Arc<str>,
     pub(super) limits: Limits,
     tail: PathBuf,
+    sampling_ratio: f64,
     pub(super) environment: WorkerEnvironment,
     d1: BTreeMap<String, D1Route>,
     r2: BTreeMap<String, Arc<R2Store>>,
@@ -76,6 +78,7 @@ pub(super) struct SocketApp {
     pub(super) registry: ObjectRegistry,
     pub(super) websocket_sessions: Arc<WebSocketRegistry>,
     telemetry: Arc<Telemetry>,
+    trace: trace::TraceSink,
     pub(super) admission: Admission,
 }
 
@@ -133,6 +136,7 @@ struct SocketContext<'a> {
     data: &'a Path,
     repository: Repository,
     limits: Limits,
+    sampling_ratio: f64,
     environments: &'a BTreeMap<String, WorkerEnvironment>,
     d1: &'a BTreeMap<String, BTreeMap<String, D1Route>>,
     r2: &'a BTreeMap<String, BTreeMap<String, Arc<R2Store>>>,
@@ -149,6 +153,7 @@ struct SocketContext<'a> {
     pub(super) objects: Arc<BTreeMap<String, String>>,
     pub(super) registry: ObjectRegistry,
     telemetry: Arc<Telemetry>,
+    trace: trace::TraceSink,
     admission: Admission,
 }
 
@@ -241,6 +246,16 @@ impl Process {
         let control_config = Arc::new(config);
 
         let telemetry = Arc::new(Telemetry::default());
+        let (trace, exporter) = match control_config.raw.otlp.clone() {
+            Some(otlp) => {
+                let (sender, exporter) = trace::Exporter::new(otlp);
+                (
+                    trace::TraceSink::with_exporter(data.join("traces"), sender),
+                    Some(exporter),
+                )
+            }
+            None => (trace::TraceSink::local(data.join("traces")), None),
+        };
         let started_at_ms = now_ms();
         let admission = Admission::new(control_config.raw.limits.isolates);
         let incarnation = Uuid::new_v4();
@@ -326,6 +341,7 @@ impl Process {
                             data: &data,
                             repository: context.repository.clone(),
                             limits: context.limits,
+                            sampling_ratio: control_config.raw.tracing.sampling_ratio,
                             environments: &context.environments,
                             d1: &context.d1,
                             r2: &context.r2,
@@ -342,6 +358,7 @@ impl Process {
                             objects: Arc::clone(&objects),
                             registry: Arc::clone(&registry),
                             telemetry: Arc::clone(&telemetry),
+                            trace: trace.clone(),
                             admission: admission.clone(),
                         },
                         bundle,
@@ -379,6 +396,11 @@ impl Process {
         }
 
         let mut supervisor = Supervisor::new();
+        if let Some(exporter) = exporter {
+            supervisor.spawn("trace-otlp-exporter", false, |shutdown| {
+                exporter.run(shutdown)
+            });
+        }
         let mut listeners = BTreeMap::new();
         for (name, listener, app) in bound {
             let address = listener.local_addr().map_err(ProcessError::Listen)?;
@@ -483,6 +505,8 @@ fn socket_app(context: SocketContext<'_>, bundle: WorkerBundle, service: &str) -
         service: Arc::from(service),
         limits: context.limits,
         tail: context.data.join("tail"),
+        trace: context.trace,
+        sampling_ratio: context.sampling_ratio,
         environment: context
             .environments
             .get(service)

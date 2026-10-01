@@ -52,6 +52,7 @@ pub enum Command {
     Diagnose(Diagnose),
     Logs(Tail),
     Tail(Tail),
+    Trace(Trace),
     Tenant {
         #[command(subcommand)]
         command: Tenant,
@@ -419,6 +420,21 @@ pub struct Tail {
     pub level: Option<TailLevel>,
     #[arg(long)]
     pub node: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub struct Trace {
+    pub config: PathBuf,
+    #[arg(long)]
+    pub service: Option<String>,
+    #[arg(long = "trace-id")]
+    pub id: Option<String>,
+    #[arg(long)]
+    pub request_id: Option<String>,
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Subcommand)]

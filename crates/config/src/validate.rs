@@ -328,11 +328,34 @@ fn validate_telemetry(config: &FleetConfig, problems: &mut Vec<Problem>) {
         ));
     }
 
-    if config.otlp.is_some() {
-        problems.push(Problem::new(
-            "otlp",
-            "OTLP export is not implemented in this build; remove this table until the exporter is available",
-        ));
+    if let Some(otlp) = &config.otlp {
+        if otlp.endpoint.trim().is_empty() {
+            problems.push(Problem::new("otlp.endpoint", "must not be empty"));
+        }
+        if !(otlp.endpoint.starts_with("http://") || otlp.endpoint.starts_with("https://")) {
+            problems.push(Problem::new(
+                "otlp.endpoint",
+                "must be an HTTP or HTTPS OTLP endpoint",
+            ));
+        }
+        if otlp.channel_capacity == 0 {
+            problems.push(Problem::new("otlp.channel_capacity", "must be at least 1"));
+        }
+        if otlp.batch_max_spans == 0 {
+            problems.push(Problem::new("otlp.batch_max_spans", "must be at least 1"));
+        }
+        if otlp.flush_interval_secs == 0 {
+            problems.push(Problem::new(
+                "otlp.flush_interval_secs",
+                "must be at least 1",
+            ));
+        }
+        if otlp.request_timeout_secs == 0 {
+            problems.push(Problem::new(
+                "otlp.request_timeout_secs",
+                "must be at least 1",
+            ));
+        }
     }
     if config.logpush.is_some() {
         problems.push(Problem::new(

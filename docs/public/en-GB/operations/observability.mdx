@@ -3,7 +3,7 @@ title: "Observability"
 description: "Use health, readiness, metrics, logs, and tail on a running Peren node."
 ---
 
-Observe a node through three HTTP endpoints and two CLI readers. Configure exporters that this build refuses out of the public path.
+Observe a node through health endpoints, Prometheus metrics, local logs, local lifecycle traces, and optional OTLP trace export.
 
 <SystemDiagram name="observability" />
 
@@ -27,7 +27,7 @@ curl -sS http://127.0.0.1:8080/metrics
 
 Metric names and HELP text are listed in [Metrics reference](/docs/reference/metrics/).
 
-## Logs and tail
+## Logs, tail, and traces
 
 `peren logs` and `peren tail` read the same local event stream for one service. `--service` is required. There is no `--kind` flag.
 
@@ -50,8 +50,40 @@ Representative console line:
 api console Error checkout failed
 ```
 
+`peren trace` reads the local lifecycle trace stream from `${PEREN_DATA_DIR}/traces/events.jsonl`. Filter by service, request id, or trace id:
+
+```sh
+peren trace peren.toml --service api --request-id request-123
+peren trace peren.toml --trace-id 4bf92f3577b34da6a3ce929d0e0e4736 --json
+```
+
+Lifecycle traces include `cell.restore`, `cell.dispatch`, `cell.commit`, and `cell.release` spans for Worker dispatch. Service binding fetches record `service.fetch`, and Durable Object fetches record `durable_object.fetch`; child dispatches keep the same trace id through those boundaries.
+
+The local trace file rotates at 64 MiB. Peren keeps the active file and one previous segment, `events.jsonl.1`; older local trace events are discarded. Use OTLP export when traces need longer retention.
+
+## OTLP export
+
+Add `[otlp]` to export sampled lifecycle spans to an OTLP HTTP trace endpoint. Export is best effort. Collector failures do not stop Worker dispatch, and Peren keeps appending local trace JSONL while the collector is down.
+
+```toml
+[tracing]
+sampling_ratio = 1.0
+
+[otlp]
+endpoint = "https://collector.example.com/v1/traces"
+service_name = "peren-node"
+batch_max_spans = 128
+flush_interval_secs = 5
+request_timeout_secs = 10
+
+[otlp.headers]
+authorization = "Bearer replace-with-token"
+```
+
+Set `sampling_ratio = 0.0` to disable span recording, or a value between `0.0` and `1.0` to sample incoming traces.
+
 ## Config that fails validation
 
-`[otlp]` and `[logpush]` fail config validation in this build. Do not add them to a production fleet file expecting export to start.
+`[logpush]` fails config validation in this build. Use `[otlp]` for trace export.
 
 Related: [Metrics reference](/docs/reference/metrics/), [Operations overview](/docs/operate/overview/), [Degraded operation](/docs/operations/degraded/).
