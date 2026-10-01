@@ -544,6 +544,78 @@ mod receipt {
     }
 
     #[tokio::test]
+    async fn restore_and_dispatch_reports_empty_cell_lifecycle_entry() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let store = MemoryStore::default();
+        let cell = CellId::from_bytes([50; 32]);
+        let node = Node::new(NodeId::from_uuid(Uuid::new_v4()), root.clone(), store);
+        let expected_root = root.clone();
+
+        let summary = node
+            .restore_and_dispatch(cell, |input| async move {
+                assert_eq!(input.path, expected_root.join(format!("{cell}.sqlite")));
+                Ok(input.restore)
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(summary.cell, cell);
+        assert_eq!(summary.source, RestoreSource::Empty);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restore_and_dispatch_reports_restored_replica_lifecycle_entry() {
+        let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
+        let store = MemoryStore::default();
+        let cell = CellId::from_bytes([51; 32]);
+        let first = Node::new(
+            NodeId::from_uuid(Uuid::new_v4()),
+            root.join("first"),
+            store.clone(),
+        );
+        let second = Node::new(
+            NodeId::from_uuid(Uuid::new_v4()),
+            root.join("second"),
+            store,
+        );
+
+        first
+            .dispatch_http(
+                cell,
+                request("/increment"),
+                counter_bundle(),
+                isolate(),
+                invocation(),
+            )
+            .await
+            .unwrap();
+        let summary = second
+            .restore_and_dispatch(cell, |input| async move { Ok(input.restore) })
+            .await
+            .unwrap();
+
+        assert_eq!(summary.cell, cell);
+        match summary.source {
+            RestoreSource::Restored {
+                epoch,
+                generation,
+                revision,
+                database_bytes,
+                wal_bytes,
+            } => {
+                assert_eq!(epoch, OwnershipEpoch::new(1));
+                assert_eq!(generation, peren_primitives::StorageRevision::new(0));
+                assert_eq!(revision, peren_primitives::StorageRevision::new(1));
+                assert!(database_bytes > 0);
+                assert!(wal_bytes > 0);
+            }
+            RestoreSource::Empty => panic!("expected restored replica"),
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn recovery_fences_the_stale_owner() {
         let root = std::env::temp_dir().join(Uuid::new_v4().to_string());
         let store = MemoryStore::default();

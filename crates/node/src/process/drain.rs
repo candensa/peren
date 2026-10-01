@@ -397,7 +397,10 @@ async fn dispatch_queue_with_host(
     let mtls = Arc::clone(&target.mtls);
     let dispatch_queues = queues.clone();
     let host_node = node.clone();
-    node.restore_and_dispatch(cell, |path, lease, store| async move {
+    node.restore_and_dispatch(cell, |input| async move {
+        let path = input.path;
+        let lease = input.lease;
+        let store = input.repository;
         let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
             &path,
             lease,

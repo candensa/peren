@@ -23,6 +23,14 @@ async fn worker_write_is_published_before_response_returns() {
         .await
         .unwrap();
     assert_eq!(written.body, b"1");
+    let commit = first.last_commit().unwrap();
+    assert_eq!(commit.revision, peren_primitives::StorageRevision::new(1));
+    assert_eq!(commit.receipt.cell(), CellId::from_bytes([1; 32]));
+    assert_eq!(commit.receipt.epoch(), OwnershipEpoch::new(1));
+    assert_eq!(
+        commit.receipt.through(),
+        peren_primitives::StorageRevision::new(1)
+    );
 
     restore_replica(&second_path, &replica);
     first.release().await.unwrap();
@@ -65,6 +73,10 @@ async fn alarm_write_is_published_before_completion() {
     .await
     .unwrap();
     first.dispatch_alarm().await.unwrap();
+    assert_eq!(
+        first.last_commit().unwrap().revision,
+        peren_primitives::StorageRevision::new(1)
+    );
 
     restore_replica(&second_path, &replica);
     first.release().await.unwrap();
@@ -116,6 +128,10 @@ async fn tail_write_is_published_before_completion() {
         })
         .await
         .unwrap();
+    assert_eq!(
+        first.last_commit().unwrap().revision,
+        peren_primitives::StorageRevision::new(1)
+    );
 
     restore_replica(&second_path, &replica);
     first.release().await.unwrap();
@@ -170,6 +186,10 @@ async fn queue_write_is_published_before_completion() {
         })
         .await
         .unwrap();
+    assert_eq!(
+        first.last_commit().unwrap().revision,
+        peren_primitives::StorageRevision::new(1)
+    );
 
     restore_replica(&second_path, &replica);
     first.release().await.unwrap();
@@ -218,6 +238,10 @@ async fn scheduled_write_is_published_before_completion() {
         })
         .await
         .unwrap();
+    assert_eq!(
+        first.last_commit().unwrap().revision,
+        peren_primitives::StorageRevision::new(1)
+    );
 
     restore_replica(&second_path, &replica);
     first.release().await.unwrap();

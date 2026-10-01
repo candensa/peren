@@ -1,10 +1,10 @@
 use std::{collections::HashSet, fs, path::PathBuf, sync::Arc};
 
 use peren_cell::{CellError, OwnershipLease, WorkerCell};
-use peren_primitives::{CellId, NodeId};
+use peren_primitives::{CellId, NodeId, OwnershipEpoch, StorageRevision};
 use peren_provider_object_store::{BucketLease, BucketStore, MemoryStore, StoreLease};
 use peren_replication::{
-    DurableReceipt, ReplicaRepository, Replicator, RepositoryError as ReplicaError,
+    DurableReceipt, ReplicaImage, ReplicaRepository, Replicator, RepositoryError as ReplicaError,
 };
 use peren_runtime::{
     HttpRequest, HttpResponse, InvocationLimits, IsolateLimits, QueueEvent, ScheduledEvent,
@@ -188,6 +188,31 @@ pub struct Node<R> {
     active: Arc<Mutex<HashSet<CellId>>>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RestoreSummary {
+    pub cell: CellId,
+    pub source: RestoreSource,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RestoreSource {
+    Empty,
+    Restored {
+        epoch: OwnershipEpoch,
+        generation: StorageRevision,
+        revision: StorageRevision,
+        database_bytes: usize,
+        wal_bytes: usize,
+    },
+}
+
+pub struct CellDispatchInput<R: NodeRepository> {
+    pub path: PathBuf,
+    pub lease: R::Lease,
+    pub repository: R,
+    pub restore: RestoreSummary,
+}
+
 impl<R: NodeRepository> Node<R> {
     #[must_use]
     pub fn new(id: NodeId, data: PathBuf, store: R) -> Self {
@@ -270,7 +295,10 @@ impl<R: NodeRepository> Node<R> {
         invocation: InvocationLimits,
         environment: WorkerEnvironment,
     ) -> Result<HttpResponse, NodeError> {
-        self.restore_and_dispatch(cell, |path, lease, store| async move {
+        self.restore_and_dispatch(cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident =
                 WorkerCell::activate(&path, lease, store, bundle, isolate, environment).await?;
             let response = resident.dispatch_http(request, invocation).await?;
@@ -298,7 +326,10 @@ impl<R: NodeRepository> Node<R> {
         isolate: IsolateLimits,
     ) -> Result<EmptyDispatchResult, NodeError> {
         let _alarm = self.enter_alarm(cell)?;
-        self.restore_and_dispatch(cell, |path, lease, store| async move {
+        self.restore_and_dispatch(cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident = WorkerCell::activate(
                 &path,
                 lease,
@@ -335,7 +366,10 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<EmptyDispatchResult, NodeError> {
-        self.restore_and_dispatch(cell, |path, lease, store| async move {
+        self.restore_and_dispatch(cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident = WorkerCell::activate(
                 &path,
                 lease,
@@ -372,7 +406,10 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<QueueDispatchResult, NodeError> {
-        self.restore_and_dispatch(cell, |path, lease, store| async move {
+        self.restore_and_dispatch(cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident = WorkerCell::activate(
                 &path,
                 lease,
@@ -408,7 +445,10 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<EmptyDispatchResult, NodeError> {
-        self.restore_and_dispatch(cell, |path, lease, store| async move {
+        self.restore_and_dispatch(cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident = WorkerCell::activate(
                 &path,
                 lease,
@@ -445,7 +485,10 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<EmptyDispatchResult, NodeError> {
-        self.restore_and_dispatch(cell, |path, lease, store| async move {
+        self.restore_and_dispatch(cell, |input| async move {
+            let path = input.path;
+            let lease = input.lease;
+            let store = input.repository;
             let mut resident = WorkerCell::activate(
                 &path,
                 lease,
@@ -498,7 +541,7 @@ impl<R: NodeRepository> Node<R> {
         dispatch: F,
     ) -> Result<T, NodeError>
     where
-        F: FnOnce(PathBuf, R::Lease, R) -> Fut,
+        F: FnOnce(CellDispatchInput<R>) -> Fut,
         Fut: Future<Output = Result<T, NodeError>>,
     {
         fs::create_dir_all(&self.data)?;
@@ -507,16 +550,49 @@ impl<R: NodeRepository> Node<R> {
         let lease = self.store.acquire(self.id, cell).await?;
         remove_if_present(&PathBuf::from(format!("{}-wal", path.display())))?;
         remove_if_present(&PathBuf::from(format!("{}-shm", path.display())))?;
-        if let Some(replica) = self.store.restore(cell).await? {
-            fs::write(&path, replica.database)?;
-            if !replica.wal.is_empty() {
-                fs::write(format!("{}-wal", path.display()), replica.wal)?;
-            }
+        let restore = if let Some(replica) = self.store.restore(cell).await? {
+            restore_replica(&path, cell, replica)?
         } else {
             remove_if_present(&path)?;
-        }
-        dispatch(path, lease, self.store.clone()).await
+            RestoreSummary {
+                cell,
+                source: RestoreSource::Empty,
+            }
+        };
+        dispatch(CellDispatchInput {
+            path,
+            lease,
+            repository: self.store.clone(),
+            restore,
+        })
+        .await
     }
+}
+
+fn restore_replica(
+    path: &std::path::Path,
+    cell: CellId,
+    replica: ReplicaImage,
+) -> Result<RestoreSummary, std::io::Error> {
+    let database_bytes = replica.database.len();
+    let wal_bytes = replica.wal.len();
+    let epoch = replica.epoch;
+    let generation = replica.generation;
+    let revision = replica.revision;
+    fs::write(path, replica.database)?;
+    if !replica.wal.is_empty() {
+        fs::write(format!("{}-wal", path.display()), replica.wal)?;
+    }
+    Ok(RestoreSummary {
+        cell,
+        source: RestoreSource::Restored {
+            epoch,
+            generation,
+            revision,
+            database_bytes,
+            wal_bytes,
+        },
+    })
 }
 
 struct CellDispatchGuard {
