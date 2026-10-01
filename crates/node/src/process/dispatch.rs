@@ -101,6 +101,9 @@ pub(super) fn router(app: App) -> Router {
         router = router
             .route("/__peren/dev", get(control::dev_overview))
             .route("/__peren/dev/topology", get(control::dev_topology))
+            .route("/__peren/dev/bindings", get(control::dev_bindings))
+            .route("/__peren/dev/queues", get(control::dev_queues))
+            .route("/__peren/dev/objects", get(control::dev_objects))
             .route("/__peren/dev/events", get(control::dev_events))
             .route("/__peren/dev/health", get(control::dev_health));
     }

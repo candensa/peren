@@ -124,6 +124,8 @@ pub enum CliError {
     Signal(#[source] std::io::Error),
     #[error("failed to write the test-server readiness record")]
     ReadyOutput(#[source] std::io::Error),
+    #[error("development reload watcher failed: {0}")]
+    Reload(String),
     #[error("inherited listener {0:?} is unsupported in this build")]
     InheritedListenerUnsupported(String),
 }

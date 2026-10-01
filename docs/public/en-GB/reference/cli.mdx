@@ -182,6 +182,9 @@ The dev process also mounts read-only inspector endpoints on each local listener
 | --- | --- |
 | `/__peren/dev` | Ready state, health, topology, node id, and incarnation |
 | `/__peren/dev/topology` | Services, sockets, binding kinds, queue consumers, bucket kind, and data dir |
+| `/__peren/dev/bindings` | Binding inventory grouped by service, including non-secret target names |
+| `/__peren/dev/queues` | Queue producer and consumer wiring |
+| `/__peren/dev/objects` | Durable Object classes and resident object ids observed in this session |
 | `/__peren/dev/events?limit=100` | Recent request and console tail events |
 | `/__peren/dev/health` | Ready state, admission mode, active work, and drain counters |
 
@@ -197,7 +200,7 @@ socket public service=api listen=127.0.0.1:8080
 info: dev uses loopback listeners with ephemeral ports and an isolated in-memory bucket
 ```
 
-Then progress, `public: http://<addr>` listener lines, and `dev inspector public: http://<addr>/__peren/dev` lines for each ready socket name. While the process runs, request and console events are printed as they are appended to the local tail log. With `--json`, Peren prints a pretty-printed topology object with `services`, `sockets`, `queues`, `diagnostics`, and local env file metadata, and suppresses the live terminal event feed.
+Then progress, `public: http://<addr>` listener lines, and `dev inspector public: http://<addr>/__peren/dev` lines for each ready socket name. While the process runs, request and console events are printed as they are appended to the local tail log. Peren watches the config file, Worker bundle, additional modules, source maps, asset directories, and loaded local env files; when one changes, it stops the local process and starts a fresh session with reloaded config and env. With `--json`, Peren prints a pretty-printed topology object with `services`, `sockets`, `queues`, `diagnostics`, and local env file metadata, and suppresses the live terminal event feed.
 
 ```sh
 peren dev fleet.toml

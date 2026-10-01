@@ -1,7 +1,7 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use peren_config::{Binding, Entrypoint, FleetConfig, QueueConsumer, Service, Socket};
@@ -237,6 +237,22 @@ impl Session {
         self.data_dir().join("tail").join("events.jsonl")
     }
 
+    pub(super) fn watch_paths(&self, config: &Path) -> Vec<PathBuf> {
+        let mut paths = BTreeSet::from([config.to_path_buf()]);
+        let env_report = self.environment.report();
+        paths.extend(env_report.loaded.iter().cloned());
+        paths.extend(env_report.ignored.iter().cloned());
+        for service in &self.raw.services {
+            paths.insert(service.worker_bundle_path.clone());
+            paths.extend(service.additional_modules.values().cloned());
+            paths.extend(service.source_maps.values().cloned());
+            if let Some(assets) = &service.assets {
+                paths.insert(assets.directory.clone());
+            }
+        }
+        paths.into_iter().collect()
+    }
+
     fn env_files(&self) -> EnvFiles {
         let report = self.environment.report();
         EnvFiles {
@@ -398,9 +414,10 @@ pub(super) async fn follow_tail(path: PathBuf) {
             }
             if metadata.len() > offset
                 && let Ok(bytes) = read_from(&path, offset).await
+                && let Some(complete) = complete_tail_lines(&bytes)
             {
-                offset = metadata.len();
-                for line in String::from_utf8_lossy(&bytes)
+                offset = offset.saturating_add(u64::try_from(complete.len()).unwrap_or(u64::MAX));
+                for line in String::from_utf8_lossy(complete)
                     .lines()
                     .filter(|line| !line.trim().is_empty())
                 {
@@ -414,6 +431,18 @@ pub(super) async fn follow_tail(path: PathBuf) {
     }
 }
 
+pub(super) async fn watch_reload(paths: Vec<PathBuf>) -> PathBuf {
+    let mut current = fingerprints(&paths);
+    loop {
+        tokio::time::sleep(Duration::from_millis(750)).await;
+        let next = fingerprints(&paths);
+        if next != current {
+            return changed_path(&current, &next).unwrap_or_else(|| paths[0].clone());
+        }
+        current = next;
+    }
+}
+
 async fn read_from(path: &Path, offset: u64) -> Result<Vec<u8>, std::io::Error> {
     use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
@@ -422,6 +451,81 @@ async fn read_from(path: &Path, offset: u64) -> Result<Vec<u8>, std::io::Error> 
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).await?;
     Ok(bytes)
+}
+
+fn fingerprints(paths: &[PathBuf]) -> BTreeMap<PathBuf, Fingerprint> {
+    paths
+        .iter()
+        .map(|path| (path.clone(), fingerprint(path)))
+        .collect()
+}
+
+fn changed_path(
+    previous: &BTreeMap<PathBuf, Fingerprint>,
+    next: &BTreeMap<PathBuf, Fingerprint>,
+) -> Option<PathBuf> {
+    previous
+        .keys()
+        .chain(next.keys())
+        .find(|path| previous.get(*path) != next.get(*path))
+        .cloned()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum Fingerprint {
+    Missing,
+    File {
+        len: u64,
+        modified: Option<SystemTime>,
+    },
+    Directory(Vec<(PathBuf, Fingerprint)>),
+}
+
+fn fingerprint(path: &Path) -> Fingerprint {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return Fingerprint::Missing;
+    };
+    if metadata.is_dir() {
+        return Fingerprint::Directory(directory_fingerprints(path, path));
+    }
+    Fingerprint::File {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+    }
+}
+
+fn directory_fingerprints(root: &Path, current: &Path) -> Vec<(PathBuf, Fingerprint)> {
+    let Ok(entries) = std::fs::read_dir(current) else {
+        return Vec::new();
+    };
+    let mut entries = entries
+        .filter_map(Result::ok)
+        .map(|entry| {
+            let path = entry.path();
+            (
+                path.strip_prefix(root).unwrap_or(&path).to_path_buf(),
+                match std::fs::metadata(&path) {
+                    Ok(metadata) if metadata.is_dir() => {
+                        Fingerprint::Directory(directory_fingerprints(root, &path))
+                    }
+                    Ok(metadata) => Fingerprint::File {
+                        len: metadata.len(),
+                        modified: metadata.modified().ok(),
+                    },
+                    Err(_) => Fingerprint::Missing,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    entries
+}
+
+fn complete_tail_lines(bytes: &[u8]) -> Option<&[u8]> {
+    bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map(|end| &bytes[..=end])
 }
 
 fn print_tail_event(event: &peren_node::TailLogEvent) {
@@ -906,6 +1010,69 @@ service = "api"
                 .diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains("no local consumer"))
+        );
+    }
+
+    #[test]
+    fn watch_paths_include_config_bundle_modules_and_assets() {
+        let temp = temp_dir();
+        let fleet = temp.join("fleet.toml");
+        fs::create_dir_all(temp.join("public")).unwrap();
+        fs::write(&fleet, "unused").unwrap();
+        fs::write(temp.join(".dev.vars"), "API_TOKEN=local\n").unwrap();
+        let mut raw = FleetConfig::from_toml(
+            r#"
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+[bucket]
+kind = "memory"
+[mtls]
+ca_cert_path = "ca.pem"
+leaf_cert_path = "leaf.pem"
+leaf_key_path = "key.pem"
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+[services.additional_modules]
+"helper.js" = "helper.js"
+[services.assets]
+directory = "public"
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+"#,
+        )
+        .unwrap();
+        resolve_paths(&mut raw, &temp);
+        let session = Session {
+            raw,
+            environment: LocalDevEnvironment::load(&fleet, LocalEnvProfile::Peren, None).unwrap(),
+            base: temp.clone(),
+            source_profile: SourceProfile::Peren,
+            env_profile: LocalEnvProfile::Peren,
+            requested_environment: None,
+        };
+
+        let watched = session.watch_paths(&fleet);
+
+        assert!(watched.contains(&fleet));
+        assert!(watched.contains(&temp.join(".dev.vars")));
+        assert!(watched.contains(&temp.join("worker.js")));
+        assert!(watched.contains(&temp.join("helper.js")));
+        assert!(watched.contains(&temp.join("public")));
+    }
+
+    #[test]
+    fn complete_tail_lines_keeps_trailing_partial_record() {
+        assert_eq!(complete_tail_lines(b""), None);
+        assert_eq!(complete_tail_lines(b"{\"a\":1}"), None);
+        assert_eq!(
+            complete_tail_lines(b"{\"a\":1}\n{\"b\""),
+            Some(&b"{\"a\":1}\n"[..])
         );
     }
 

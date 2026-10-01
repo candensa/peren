@@ -107,6 +107,8 @@ dev inspector public: http://127.0.0.1:54321/__peren/dev
 
 Call the `public:` URL. The port is the one this process bound, which is not necessarily `8080`. The other printed lines show the session shape and local diagnostics. Use `--json` when a script needs a stable shape. The `dev inspector` URL returns JSON for the active local session.
 
+When the config, Worker bundle, modules, source maps, or asset files change, `peren dev` restarts the local process and reloads the session.
+
 ## Send a request
 
 ```sh

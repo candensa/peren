@@ -86,6 +86,48 @@ pub(super) async fn dev_events(
     }
 }
 
+pub(super) async fn dev_bindings(State(app): State<App>) -> impl IntoResponse {
+    if !app.dev_inspector {
+        return AxumStatusCode::NOT_FOUND.into_response();
+    }
+    AxumJson(serde_json::json!({ "services": dev_bindings_json(&app) })).into_response()
+}
+
+pub(super) async fn dev_queues(State(app): State<App>) -> impl IntoResponse {
+    if !app.dev_inspector {
+        return AxumStatusCode::NOT_FOUND.into_response();
+    }
+    AxumJson(serde_json::json!({ "queues": dev_queues_json(&app) })).into_response()
+}
+
+pub(super) async fn dev_objects(State(app): State<App>) -> impl IntoResponse {
+    if !app.dev_inspector {
+        return AxumStatusCode::NOT_FOUND.into_response();
+    }
+    let objects = app
+        .socket
+        .as_ref()
+        .map(|socket| {
+            socket
+                .registry
+                .lock()
+                .map(|registry| {
+                    registry
+                        .iter()
+                        .map(|(class, ids)| {
+                            serde_json::json!({
+                                "class": class,
+                                "ids": ids.iter().collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    AxumJson(serde_json::json!({ "objects": objects })).into_response()
+}
+
 pub(super) async fn dev_health(State(app): State<App>) -> impl IntoResponse {
     if !app.dev_inspector {
         return AxumStatusCode::NOT_FOUND.into_response();
@@ -107,6 +149,122 @@ fn dev_health_json(app: &App) -> serde_json::Value {
         "refused": snapshot.refused,
         "disk_removal_safe": snapshot.active == 0,
     })
+}
+
+fn dev_bindings_json(app: &App) -> Vec<serde_json::Value> {
+    app.config
+        .raw
+        .services
+        .iter()
+        .map(|service| {
+            let bindings = service
+                .bindings
+                .iter()
+                .map(|(name, binding)| binding_json(name, binding))
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "service": service.name,
+                "bindings": bindings,
+                "vars": service.vars.keys().collect::<Vec<_>>(),
+                "secrets": service.secrets.keys().chain(service.secrets_store_refs.keys()).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
+fn binding_json(name: &str, binding: &peren_config::Binding) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "name": name,
+        "kind": binding_kind(binding),
+    });
+    if let Some(target) = binding_target(binding) {
+        value["target"] = serde_json::Value::String(target);
+    }
+    value
+}
+
+fn binding_target(binding: &peren_config::Binding) -> Option<String> {
+    match binding {
+        peren_config::Binding::Service { entrypoint, .. } => Some(entrypoint.clone()),
+        peren_config::Binding::DurableObjectNamespace { class_name, .. }
+        | peren_config::Binding::Workflow { class_name, .. } => Some(class_name.clone()),
+        peren_config::Binding::Kv { namespace, .. }
+        | peren_config::Binding::Dispatcher { namespace } => Some(namespace.clone()),
+        peren_config::Binding::D1Database { database_name, .. } => Some(database_name.clone()),
+        peren_config::Binding::R2Bucket { bucket, .. } => Some(bucket.clone()),
+        peren_config::Binding::Queue { queue_name } => Some(queue_name.clone()),
+        _ => None,
+    }
+}
+
+fn dev_queues_json(app: &App) -> Vec<serde_json::Value> {
+    let producers = app
+        .config
+        .raw
+        .services
+        .iter()
+        .flat_map(|service| {
+            service
+                .bindings
+                .iter()
+                .filter_map(|(binding, config)| match config {
+                    peren_config::Binding::Queue { queue_name } => Some((
+                        queue_name.clone(),
+                        serde_json::json!({
+                            "service": service.name,
+                            "binding": binding,
+                        }),
+                    )),
+                    _ => None,
+                })
+        })
+        .fold(
+            std::collections::BTreeMap::<String, Vec<serde_json::Value>>::new(),
+            |mut queues, (queue, producer)| {
+                queues.entry(queue).or_default().push(producer);
+                queues
+            },
+        );
+    let consumers = app
+        .config
+        .raw
+        .services
+        .iter()
+        .flat_map(|service| {
+            service.consumes_queues.iter().map(|consumer| {
+                (
+                    queue_name(consumer),
+                    serde_json::json!({ "service": service.name }),
+                )
+            })
+        })
+        .fold(
+            std::collections::BTreeMap::<String, Vec<serde_json::Value>>::new(),
+            |mut queues, (queue, consumer)| {
+                queues.entry(queue).or_default().push(consumer);
+                queues
+            },
+        );
+    producers
+        .keys()
+        .chain(consumers.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(|queue| {
+            serde_json::json!({
+                "queue": queue,
+                "producers": producers.get(queue).cloned().unwrap_or_default(),
+                "consumers": consumers.get(queue).cloned().unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+fn queue_name(consumer: &peren_config::QueueConsumer) -> String {
+    match consumer {
+        peren_config::QueueConsumer::Name(name) => name.clone(),
+        peren_config::QueueConsumer::Settings(settings) => settings.queue.clone(),
+    }
 }
 
 fn dev_topology_json(app: &App) -> serde_json::Value {
