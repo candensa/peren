@@ -31,6 +31,7 @@ pub struct WorkerCell<L, R> {
     replicator: Replicator<R>,
     runtime: WorkerRuntime,
     wal_offset: u64,
+    wal_bytes_since_generation: u64,
     generation: peren_primitives::StorageRevision,
     last_commit: Option<CellCommitSummary>,
     state: CellState,
@@ -83,6 +84,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             replicator: Replicator::new(repository),
             runtime,
             wal_offset: 0,
+            wal_bytes_since_generation: 0,
             generation: peren_primitives::StorageRevision::default(),
             last_commit: None,
             state: CellState::Active,
@@ -112,6 +114,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             replicator: Replicator::new(repository),
             runtime,
             wal_offset: 0,
+            wal_bytes_since_generation: 0,
             generation: peren_primitives::StorageRevision::default(),
             last_commit: None,
             state: CellState::Active,
@@ -165,6 +168,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             replicator: Replicator::new(repository),
             runtime,
             wal_offset: 0,
+            wal_bytes_since_generation: 0,
             generation: peren_primitives::StorageRevision::default(),
             last_commit: None,
             state: CellState::Active,
@@ -319,6 +323,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         }
         self.generation = checkpoint.revision;
         self.wal_offset = 0;
+        self.wal_bytes_since_generation = 0;
         self.last_commit = Some(CellCommitSummary {
             revision: checkpoint.revision,
             receipt: DurableReceipt::new(
@@ -327,9 +332,23 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
                 checkpoint.revision,
                 checkpoint.revision,
             ),
+            wal_bytes: 0,
         });
         self.prune().await?;
         self.verify().await
+    }
+
+    pub async fn checkpoint_if_wal_exceeds(
+        &mut self,
+        threshold_bytes: u64,
+    ) -> Result<(), CellError> {
+        if threshold_bytes == 0 {
+            return Ok(());
+        }
+        if self.wal_bytes_since_generation >= threshold_bytes {
+            self.checkpoint().await?;
+        }
+        Ok(())
     }
 
     pub async fn delete(mut self) -> Result<(), CellError> {
@@ -398,6 +417,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
                 self.state = CellState::Draining;
             })?;
         let offset = replica.offset;
+        let wal_bytes = replica.frames.len();
         let receipt = self
             .replicator
             .publish(
@@ -429,7 +449,14 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             return Err(CellError::InvalidReceipt);
         }
         self.wal_offset = offset;
-        self.last_commit = Some(CellCommitSummary { revision, receipt });
+        self.wal_bytes_since_generation = self
+            .wal_bytes_since_generation
+            .saturating_add(u64::try_from(wal_bytes).unwrap_or(u64::MAX));
+        self.last_commit = Some(CellCommitSummary {
+            revision,
+            receipt,
+            wal_bytes,
+        });
         Ok(())
     }
 }
@@ -438,6 +465,7 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
 pub struct CellCommitSummary {
     pub revision: peren_primitives::StorageRevision,
     pub receipt: DurableReceipt,
+    pub wal_bytes: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

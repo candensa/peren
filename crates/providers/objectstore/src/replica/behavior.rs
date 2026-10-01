@@ -147,6 +147,66 @@ async fn bucket_store_preserves_cas_and_replica_contracts() {
 }
 
 #[tokio::test]
+async fn root_manifest_retains_the_full_wal_chain() {
+    let store = BucketStore::new(Arc::new(InMemory::new()));
+    let cell = CellId::from_bytes([13; 32]);
+    let _lease = store.acquire(node(), cell).await.unwrap();
+    let epoch = OwnershipEpoch::new(1);
+
+    for revision in 1_u8..=3 {
+        store
+            .publish_through(
+                cell,
+                epoch,
+                StorageRevision::new(u64::from(revision)),
+                &ReplicaPayload {
+                    generation: StorageRevision::new(0),
+                    database: b"database".to_vec(),
+                    wal_header: Some([7; 32]),
+                    wal_frames: vec![revision],
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    let root = store.read_root(cell).await.unwrap().unwrap();
+    assert_eq!(
+        root.wal,
+        vec![
+            StorageRevision::new(1),
+            StorageRevision::new(2),
+            StorageRevision::new(3)
+        ]
+    );
+    let restored = store.restore(cell).await.unwrap().unwrap();
+    assert_eq!(restored.revision, StorageRevision::new(3));
+    assert_eq!(&restored.wal[..32], &[7; 32]);
+    assert_eq!(&restored.wal[32..], &[1, 2, 3]);
+}
+
+#[tokio::test]
+async fn root_manifest_does_not_move_backward() {
+    let store = BucketStore::new(Arc::new(InMemory::new()));
+    let cell = CellId::from_bytes([15; 32]);
+    let _lease = store.acquire(node(), cell).await.unwrap();
+    let epoch = OwnershipEpoch::new(1);
+
+    store
+        .checkpoint(cell, epoch, StorageRevision::new(3), b"newer")
+        .await
+        .unwrap();
+    store
+        .checkpoint(cell, epoch, StorageRevision::new(2), b"older")
+        .await
+        .unwrap();
+
+    let restored = store.restore(cell).await.unwrap().unwrap();
+    assert_eq!(restored.revision, StorageRevision::new(3));
+    assert_eq!(restored.database, b"newer");
+}
+
+#[tokio::test]
 async fn immutable_snapshot_identity_rejects_different_bytes() {
     let store = BucketStore::new(Arc::new(InMemory::new()));
     let cell = CellId::from_bytes([4; 32]);
@@ -275,6 +335,67 @@ async fn pruning_retains_the_newest_complete_restore_point() {
         store.positions(cell, ReplicaKind::Wal).await.unwrap().len(),
         1
     );
+}
+
+#[tokio::test]
+async fn replica_prune_removes_only_objects_unreachable_from_root() {
+    let objects = Arc::new(InMemory::new());
+    let store = BucketStore::new(objects.clone());
+    let cell = CellId::from_bytes([14; 32]);
+    let lease = store.acquire(node(), cell).await.unwrap();
+    let epoch = lease.epoch();
+    store
+        .checkpoint(cell, epoch, StorageRevision::new(10), b"root-db")
+        .await
+        .unwrap();
+    objects
+        .put(
+            &snapshot_key(cell, OwnershipEpoch::new(1), StorageRevision::new(1)),
+            PutPayload::from_static(b"old-db"),
+        )
+        .await
+        .unwrap();
+    objects
+        .put(
+            &wal_key(cell, OwnershipEpoch::new(1), StorageRevision::new(2)),
+            PutPayload::from_static(b"old-wal"),
+        )
+        .await
+        .unwrap();
+
+    let dry = store.prune_replicas(true).await.unwrap();
+    assert!(dry.dry_run);
+    assert_eq!(dry.cells_scanned, 1);
+    assert_eq!(dry.objects_retained, 1);
+    assert_eq!(dry.objects_removed, 2);
+    assert!(
+        objects
+            .get(&snapshot_key(
+                cell,
+                OwnershipEpoch::new(1),
+                StorageRevision::new(1)
+            ))
+            .await
+            .is_ok()
+    );
+
+    let applied = store.prune_replicas(false).await.unwrap();
+    assert!(!applied.dry_run);
+    assert_eq!(applied.cells_scanned, 1);
+    assert_eq!(applied.objects_retained, 1);
+    assert_eq!(applied.objects_removed, 2);
+    assert!(
+        objects
+            .get(&snapshot_key(
+                cell,
+                OwnershipEpoch::new(1),
+                StorageRevision::new(1)
+            ))
+            .await
+            .is_err()
+    );
+    let restored = store.restore(cell).await.unwrap().unwrap();
+    assert_eq!(restored.database, b"root-db");
 }
 
 #[tokio::test]

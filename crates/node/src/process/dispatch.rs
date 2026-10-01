@@ -712,6 +712,9 @@ async fn dispatch_cell_plain(
             let response = resident
                 .dispatch_http(dispatch.request, dispatch.invocation)
                 .await?;
+            resident
+                .checkpoint_if_wal_exceeds(app.checkpoint_threshold_bytes)
+                .await?;
             let commit = resident.last_commit();
             let _ = trace_sink.record_span(
                 &trace_context,
@@ -864,6 +867,9 @@ async fn dispatch_cell_host(
             let response = resident
                 .dispatch_http(dispatch.request, dispatch.invocation)
                 .await?;
+            resident
+                .checkpoint_if_wal_exceeds(app.checkpoint_threshold_bytes)
+                .await?;
             let commit = resident.last_commit();
             let _ = trace_sink.record_span(
                 &trace_context,
@@ -1008,6 +1014,9 @@ async fn dispatch_websocket_plain(
                 }
                 WebSocketEvent::Close(event) => resident.dispatch_websocket_close(event).await?,
             };
+            resident
+                .checkpoint_if_wal_exceeds(app.checkpoint_threshold_bytes)
+                .await?;
             let logs = resident.take_console_events();
             resident.release().await?;
             Ok((dispatch, logs))
@@ -1080,6 +1089,9 @@ async fn dispatch_websocket_host(
                 }
                 WebSocketEvent::Close(event) => resident.dispatch_websocket_close(event).await?,
             };
+            resident
+                .checkpoint_if_wal_exceeds(app.checkpoint_threshold_bytes)
+                .await?;
             let logs = resident.take_console_events();
             resident.release().await?;
             Ok((dispatch, logs))

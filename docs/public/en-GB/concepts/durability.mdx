@@ -16,6 +16,14 @@ A cell keeps its mutable state in SQLite on the owning node. After a dispatch co
 
 `Peren.storage.mutation` records the callback result under the mutation id. A later call with the same id returns the stored result and does not run the callback again.
 
+## Replica manifest
+
+Replica objects are immutable. The mutable restore pointer is `cells/<cell>/root.json`. That root names one complete restore plan: the snapshot generation, the latest revision and every WAL segment needed after the snapshot. Restore reads the root first and rebuilds only the state it names.
+
+Checkpointing writes a new complete database image, resets the WAL boundary and prunes superseded replica objects. The `limits.checkpoint_threshold_bytes` setting, or a service-level override, triggers a checkpoint when a dispatch publishes at least that many WAL bytes. Set the threshold to `0` to disable threshold-triggered checkpoints.
+
+`peren storage prune` uses the same root reachability rule. It keeps the root snapshot and WAL objects, then removes replica objects that are no longer reachable from the authoritative root.
+
 ## Lifecycle trace points
 
 Each mutable dispatch passes through the same observable lifecycle:

@@ -59,6 +59,7 @@ pub(super) struct SocketApp {
     pub(super) bundle: WorkerBundle,
     pub(super) service: Arc<str>,
     pub(super) limits: Limits,
+    pub(super) checkpoint_threshold_bytes: u64,
     tail: PathBuf,
     sampling_ratio: f64,
     pub(super) environment: WorkerEnvironment,
@@ -86,6 +87,7 @@ pub(super) struct SocketApp {
 pub(super) struct ServiceTarget {
     pub(super) bundle: WorkerBundle,
     pub(super) environment: WorkerEnvironment,
+    pub(super) checkpoint_threshold_bytes: u64,
     d1: BTreeMap<String, D1Route>,
     r2: BTreeMap<String, Arc<R2Store>>,
     r2_notifications: Vec<R2NotificationRule>,
@@ -136,6 +138,7 @@ struct SocketContext<'a> {
     data: &'a Path,
     repository: Repository,
     limits: Limits,
+    checkpoint_thresholds: &'a BTreeMap<String, u64>,
     sampling_ratio: f64,
     environments: &'a BTreeMap<String, WorkerEnvironment>,
     d1: &'a BTreeMap<String, BTreeMap<String, D1Route>>,
@@ -167,6 +170,7 @@ struct ProcessContext {
     data: PathBuf,
     repository: Repository,
     limits: Limits,
+    checkpoint_thresholds: BTreeMap<String, u64>,
     telemetry: Arc<Telemetry>,
     admission: Admission,
     environments: BTreeMap<String, WorkerEnvironment>,
@@ -190,6 +194,7 @@ pub(super) struct Limits {
     pub(super) heap: usize,
     pub(super) execution: Duration,
     subrequests: u32,
+    pub(super) checkpoint_threshold_bytes: u64,
 }
 
 fn reject_unknown_inherited(
@@ -354,6 +359,7 @@ impl Process {
                             cache: context.cache.clone(),
                             consumers: &context.consumers,
                             assets: &context.assets,
+                            checkpoint_thresholds: &context.checkpoint_thresholds,
                             services: Arc::clone(&services),
                             objects: Arc::clone(&objects),
                             registry: Arc::clone(&registry),
@@ -467,6 +473,7 @@ fn process_context(
                 .map_err(|_| ProcessError::Limit("max_heap_bytes"))?,
             execution: Duration::from_millis(config.raw.limits.execution_time_ms),
             subrequests: config.raw.limits.subrequests_per_invocation,
+            checkpoint_threshold_bytes: config.raw.limits.checkpoint_threshold_bytes,
         },
         telemetry,
         admission,
@@ -495,6 +502,7 @@ fn process_context(
                 .map(|queues| &queues.consumer_defaults),
         ),
         assets: asset_configs(&config.raw.services),
+        checkpoint_thresholds: checkpoint_thresholds(&config.raw.services),
     })
 }
 
@@ -504,6 +512,11 @@ fn socket_app(context: SocketContext<'_>, bundle: WorkerBundle, service: &str) -
         bundle,
         service: Arc::from(service),
         limits: context.limits,
+        checkpoint_threshold_bytes: context
+            .checkpoint_thresholds
+            .get(service)
+            .copied()
+            .unwrap_or(context.limits.checkpoint_threshold_bytes),
         tail: context.data.join("tail"),
         trace: context.trace,
         sampling_ratio: context.sampling_ratio,
@@ -757,6 +770,11 @@ fn service_targets(
                         .get(name)
                         .cloned()
                         .unwrap_or_else(WorkerEnvironment::empty),
+                    checkpoint_threshold_bytes: context
+                        .checkpoint_thresholds
+                        .get(name)
+                        .copied()
+                        .unwrap_or(context.limits.checkpoint_threshold_bytes),
                     d1: context.d1.get(name).cloned().unwrap_or_default(),
                     r2: context.r2.get(name).cloned().unwrap_or_default(),
                     r2_notifications: context
@@ -774,6 +792,17 @@ fn service_targets(
                     mtls: context.mtls.get(name).cloned().unwrap_or_default(),
                 },
             )
+        })
+        .collect()
+}
+
+fn checkpoint_thresholds(services: &[Service]) -> BTreeMap<String, u64> {
+    services
+        .iter()
+        .filter_map(|service| {
+            service
+                .checkpoint_threshold_bytes
+                .map(|threshold| (service.name.clone(), threshold))
         })
         .collect()
 }

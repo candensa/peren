@@ -592,6 +592,9 @@ async fn dispatch_service(
             .await?;
             let dispatch_started = Instant::now();
             let response = resident.dispatch_http(fetch.request, invocation).await?;
+            resident
+                .checkpoint_if_wal_exceeds(target.checkpoint_threshold_bytes)
+                .await?;
             let commit = resident.last_commit();
             record_lifecycle(
                 &trace,
@@ -821,6 +824,9 @@ async fn dispatch_object(
             resident.bind_durable_class(&fetch.class_name)?;
             let dispatch_started = Instant::now();
             let response = resident.dispatch_http(fetch.request, invocation).await?;
+            resident
+                .checkpoint_if_wal_exceeds(target.checkpoint_threshold_bytes)
+                .await?;
             let commit = resident.last_commit();
             record_lifecycle(
                 &trace,

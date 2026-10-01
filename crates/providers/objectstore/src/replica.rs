@@ -1,7 +1,10 @@
-use std::{collections::BTreeSet, num::NonZeroUsize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    num::NonZeroUsize,
+};
 
 use futures::StreamExt;
-use object_store::{PutMode, PutOptions, PutPayload, path::Path};
+use object_store::{PutMode, PutOptions, PutPayload, UpdateVersion, path::Path};
 use peren_fleet::OwnershipRepository;
 use peren_primitives::{CellId, OwnershipEpoch, StorageRevision};
 use peren_replication::{
@@ -9,6 +12,15 @@ use peren_replication::{
 };
 
 use crate::BucketStore;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ReplicaPruneReport {
+    pub dry_run: bool,
+    pub cells_scanned: usize,
+    pub objects_retained: usize,
+    pub objects_removed: usize,
+    pub bytes_removed: u64,
+}
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub(crate) struct ReplicaRoot {
@@ -20,6 +32,24 @@ pub(crate) struct ReplicaRoot {
 }
 
 impl BucketStore {
+    async fn verify_replica_owner(
+        &self,
+        cell: CellId,
+        epoch: OwnershipEpoch,
+    ) -> Result<(), ReplicaError> {
+        let Some(owner) = self
+            .load(cell)
+            .await
+            .map_err(|_| ReplicaError::Unavailable)?
+        else {
+            return Err(ReplicaError::Fenced);
+        };
+        if owner.ownership.owner.is_none() || owner.ownership.epoch != epoch {
+            return Err(ReplicaError::Fenced);
+        }
+        Ok(())
+    }
+
     pub(crate) async fn put_immutable(&self, key: &Path, bytes: &[u8]) -> Result<(), ReplicaError> {
         let options = PutOptions {
             mode: PutMode::Create,
@@ -133,20 +163,50 @@ impl BucketStore {
 }
 impl BucketStore {
     pub(crate) async fn write_root(&self, root: ReplicaRoot) -> Result<(), ReplicaError> {
+        let key = root_key(root.cell);
         let bytes = serde_json::to_vec(&root).map_err(|_| ReplicaError::Malformed)?;
-        self.store
-            .put(&root_key(root.cell), PutPayload::from(bytes))
-            .await
-            .map_err(|_| ReplicaError::Unavailable)?;
-        Ok(())
+        for _ in 0..3 {
+            let current = self.read_root_version(root.cell).await?;
+            let Some(mode) = root_put_mode(current.as_ref(), &root)? else {
+                return Ok(());
+            };
+            let options = PutOptions {
+                mode,
+                ..PutOptions::default()
+            };
+            match self
+                .store
+                .put_opts(&key, PutPayload::from(bytes.clone()), options)
+                .await
+            {
+                Ok(_) => return Ok(()),
+                Err(
+                    object_store::Error::AlreadyExists { .. }
+                    | object_store::Error::Precondition { .. },
+                ) => {}
+                Err(_) => return Err(ReplicaError::Unavailable),
+            }
+        }
+        Err(ReplicaError::Unavailable)
     }
 
     pub(crate) async fn read_root(
         &self,
         cell: CellId,
     ) -> Result<Option<ReplicaRoot>, ReplicaError> {
+        Ok(self.read_root_version(cell).await?.map(|(root, _)| root))
+    }
+
+    async fn read_root_version(
+        &self,
+        cell: CellId,
+    ) -> Result<Option<(ReplicaRoot, UpdateVersion)>, ReplicaError> {
         match self.store.get(&root_key(cell)).await {
             Ok(result) => {
+                let version = UpdateVersion {
+                    e_tag: result.meta.e_tag.clone(),
+                    version: result.meta.version.clone(),
+                };
                 let bytes = result
                     .bytes()
                     .await
@@ -154,7 +214,7 @@ impl BucketStore {
                 let root: ReplicaRoot =
                     serde_json::from_slice(&bytes).map_err(|_| ReplicaError::Malformed)?;
                 if root.cell == cell {
-                    Ok(Some(root))
+                    Ok(Some((root, version)))
                 } else {
                     Err(ReplicaError::Malformed)
                 }
@@ -190,6 +250,95 @@ impl BucketStore {
             wal,
         })
     }
+
+    pub async fn prune_replicas(&self, dry_run: bool) -> Result<ReplicaPruneReport, ReplicaError> {
+        let mut report = ReplicaPruneReport {
+            dry_run,
+            ..ReplicaPruneReport::default()
+        };
+        for cell in self.root_cells().await? {
+            let cell_report = self.prune_cell_replicas(cell, dry_run).await?;
+            report.cells_scanned += cell_report.cells_scanned;
+            report.objects_retained += cell_report.objects_retained;
+            report.objects_removed += cell_report.objects_removed;
+            report.bytes_removed = report
+                .bytes_removed
+                .saturating_add(cell_report.bytes_removed);
+        }
+        Ok(report)
+    }
+
+    async fn prune_cell_replicas(
+        &self,
+        cell: CellId,
+        dry_run: bool,
+    ) -> Result<ReplicaPruneReport, ReplicaError> {
+        let Some(root) = self.read_root(cell).await? else {
+            return Ok(ReplicaPruneReport {
+                dry_run,
+                ..ReplicaPruneReport::default()
+            });
+        };
+        let reachable = root_reachable(&root);
+        let candidates = self.replica_objects(cell).await?;
+        let mut report = ReplicaPruneReport {
+            dry_run,
+            cells_scanned: 1,
+            ..ReplicaPruneReport::default()
+        };
+        for (key, size) in candidates {
+            if reachable.contains(&key) || replica_object_is_newer_than_root(cell, &key, &root) {
+                report.objects_retained += 1;
+                continue;
+            }
+            if !dry_run {
+                let Some(current_root) = self.read_root(cell).await? else {
+                    report.objects_retained += 1;
+                    continue;
+                };
+                if root_reachable(&current_root).contains(&key)
+                    || replica_object_is_newer_than_root(cell, &key, &current_root)
+                {
+                    report.objects_retained += 1;
+                    continue;
+                }
+            }
+            report.objects_removed += 1;
+            report.bytes_removed = report.bytes_removed.saturating_add(size);
+            if !dry_run {
+                self.delete_replica(&key).await?;
+            }
+        }
+        Ok(report)
+    }
+
+    async fn root_cells(&self) -> Result<BTreeSet<CellId>, ReplicaError> {
+        let mut objects = self.store.list(Some(&Path::from("cells")));
+        let mut cells = BTreeSet::new();
+        while let Some(item) = objects.next().await {
+            let meta = item.map_err(|_| ReplicaError::Unavailable)?;
+            if let Some(cell) = parse_root_cell(meta.location.as_ref()) {
+                cells.insert(cell);
+            }
+        }
+        Ok(cells)
+    }
+
+    async fn replica_objects(&self, cell: CellId) -> Result<BTreeMap<Path, u64>, ReplicaError> {
+        let mut objects = BTreeMap::new();
+        for prefix in [
+            Path::from(format!("cells/{cell}/snapshot")),
+            Path::from(format!("cells/{cell}/wal")),
+            Path::from(format!("cells/{cell}/wal-header")),
+        ] {
+            let mut listed = self.store.list(Some(&prefix));
+            while let Some(item) = listed.next().await {
+                let meta = item.map_err(|_| ReplicaError::Unavailable)?;
+                objects.insert(meta.location, u64::try_from(meta.size).unwrap_or(u64::MAX));
+            }
+        }
+        Ok(objects)
+    }
 }
 
 impl ReplicaRepository for BucketStore {
@@ -200,21 +349,19 @@ impl ReplicaRepository for BucketStore {
         revision: StorageRevision,
         payload: &ReplicaPayload,
     ) -> Result<(), ReplicaError> {
-        let Some(owner) = self
-            .load(cell)
-            .await
-            .map_err(|_| ReplicaError::Unavailable)?
-        else {
-            return Err(ReplicaError::Fenced);
-        };
-        if owner.ownership.owner.is_none() || owner.ownership.epoch != epoch {
-            return Err(ReplicaError::Fenced);
-        }
+        self.verify_replica_owner(cell, epoch).await?;
         let baseline = payload.generation;
         let database_key = snapshot_key(cell, epoch, baseline);
         let wal_key = wal_key(cell, epoch, revision);
         self.put_immutable(&database_key, &payload.database).await?;
         if payload.wal_frames.is_empty() {
+            self.verify_replica_owner(cell, epoch).await?;
+            if self.root_is_ahead(cell, epoch, revision).await? {
+                return Ok(());
+            }
+            if self.root_covers(cell, epoch, baseline, revision).await? {
+                return Ok(());
+            }
             return self
                 .write_root(ReplicaRoot {
                     cell,
@@ -236,12 +383,30 @@ impl ReplicaRepository for BucketStore {
         self.put_immutable(&wal_generation_key(cell, epoch, baseline), &header)
             .await?;
         self.put_immutable(&wal_key, &payload.wal_frames).await?;
+        self.verify_replica_owner(cell, epoch).await?;
+        if self.root_is_ahead(cell, epoch, revision).await? {
+            return Ok(());
+        }
+        if self.root_covers(cell, epoch, baseline, revision).await? {
+            return Ok(());
+        }
+        let mut wal = self
+            .read_root(cell)
+            .await?
+            .filter(|root| {
+                root.epoch == epoch
+                    && root.generation == baseline
+                    && root.revision < revision
+                    && !root.wal.contains(&revision)
+            })
+            .map_or_else(Vec::new, |root| root.wal);
+        wal.push(revision);
         self.write_root(ReplicaRoot {
             cell,
             epoch,
             generation: baseline,
             revision,
-            wal: vec![revision],
+            wal,
         })
         .await
     }
@@ -323,18 +488,16 @@ impl ReplicaRepository for BucketStore {
         revision: StorageRevision,
         database: &[u8],
     ) -> Result<(), ReplicaError> {
-        let Some(owner) = self
-            .load(cell)
-            .await
-            .map_err(|_| ReplicaError::Unavailable)?
-        else {
-            return Err(ReplicaError::Fenced);
-        };
-        if owner.ownership.owner.is_none() || owner.ownership.epoch != epoch {
-            return Err(ReplicaError::Fenced);
-        }
+        self.verify_replica_owner(cell, epoch).await?;
         self.put_immutable(&snapshot_key(cell, epoch, revision), database)
             .await?;
+        self.verify_replica_owner(cell, epoch).await?;
+        if self.root_is_ahead(cell, epoch, revision).await? {
+            return Ok(());
+        }
+        if self.root_covers(cell, epoch, revision, revision).await? {
+            return Ok(());
+        }
         self.write_root(ReplicaRoot {
             cell,
             epoch,
@@ -383,8 +546,169 @@ impl ReplicaRepository for BucketStore {
         Ok(remove)
     }
 }
+
+impl BucketStore {
+    async fn root_is_ahead(
+        &self,
+        cell: CellId,
+        epoch: OwnershipEpoch,
+        revision: StorageRevision,
+    ) -> Result<bool, ReplicaError> {
+        Ok(self
+            .read_root(cell)
+            .await?
+            .is_some_and(|root| root.epoch == epoch && root.revision > revision))
+    }
+
+    async fn root_covers(
+        &self,
+        cell: CellId,
+        epoch: OwnershipEpoch,
+        generation: StorageRevision,
+        revision: StorageRevision,
+    ) -> Result<bool, ReplicaError> {
+        Ok(self.read_root(cell).await?.is_some_and(|root| {
+            root.epoch == epoch && root.generation == generation && root.revision >= revision
+        }))
+    }
+}
 fn root_key(cell: CellId) -> Path {
     Path::from(format!("cells/{cell}/root.json"))
+}
+
+fn root_put_mode(
+    current: Option<&(ReplicaRoot, UpdateVersion)>,
+    next: &ReplicaRoot,
+) -> Result<Option<PutMode>, ReplicaError> {
+    let Some((root, version)) = current else {
+        return Ok(Some(PutMode::Create));
+    };
+    if root.cell != next.cell {
+        return Err(ReplicaError::Malformed);
+    }
+    if root.epoch > next.epoch {
+        return Ok(None);
+    }
+    if root.epoch == next.epoch && root.revision > next.revision {
+        return Ok(None);
+    }
+    if root.epoch == next.epoch
+        && root.generation == next.generation
+        && root.revision >= next.revision
+    {
+        return Ok(None);
+    }
+    Ok(Some(PutMode::Update(version.clone())))
+}
+
+fn root_reachable(root: &ReplicaRoot) -> BTreeSet<Path> {
+    let mut reachable = BTreeSet::from([
+        snapshot_key(root.cell, root.epoch, root.generation),
+        wal_generation_key(root.cell, root.epoch, root.generation),
+    ]);
+    if !root.wal.is_empty() {
+        reachable.insert(wal_header_key(root.cell, root.epoch));
+    }
+    for revision in &root.wal {
+        reachable.insert(wal_key(root.cell, root.epoch, *revision));
+    }
+    reachable
+}
+
+fn replica_object_is_newer_than_root(cell: CellId, key: &Path, root: &ReplicaRoot) -> bool {
+    let Some(object) = ReplicaObject::parse(cell, key.as_ref()) else {
+        return true;
+    };
+    match object {
+        ReplicaObject::Snapshot { epoch, revision }
+        | ReplicaObject::Wal { epoch, revision }
+        | ReplicaObject::WalGeneration { epoch, revision } => {
+            epoch > root.epoch || (epoch == root.epoch && revision > root.revision)
+        }
+        ReplicaObject::WalHeader { epoch } => epoch >= root.epoch,
+    }
+}
+
+fn parse_root_cell(key: &str) -> Option<CellId> {
+    let value = key.strip_prefix("cells/")?.strip_suffix("/root.json")?;
+    if value.len() != 64 {
+        return None;
+    }
+    let mut bytes = [0_u8; 32];
+    for (index, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
+        let high = hex_value(chunk[0])?;
+        let low = hex_value(chunk[1])?;
+        bytes[index] = (high << 4) | low;
+    }
+    Some(CellId::from_bytes(bytes))
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+enum ReplicaObject {
+    Snapshot {
+        epoch: OwnershipEpoch,
+        revision: StorageRevision,
+    },
+    Wal {
+        epoch: OwnershipEpoch,
+        revision: StorageRevision,
+    },
+    WalHeader {
+        epoch: OwnershipEpoch,
+    },
+    WalGeneration {
+        epoch: OwnershipEpoch,
+        revision: StorageRevision,
+    },
+}
+
+impl ReplicaObject {
+    fn parse(cell: CellId, key: &str) -> Option<Self> {
+        if let Some((epoch, revision)) = parse_revision_key(cell, "snapshot", ".sqlite", key) {
+            return Some(Self::Snapshot { epoch, revision });
+        }
+        if let Some((epoch, revision)) = parse_revision_key(cell, "wal", ".bin", key) {
+            return Some(Self::Wal { epoch, revision });
+        }
+        if let Some((epoch, revision)) = parse_revision_key(cell, "wal-header", ".bin", key) {
+            return Some(Self::WalGeneration { epoch, revision });
+        }
+        let prefix = format!("cells/{cell}/wal-header/e");
+        let epoch = key.strip_prefix(&prefix)?.strip_suffix(".bin")?;
+        if epoch.contains('/') || !epoch.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        Some(Self::WalHeader {
+            epoch: OwnershipEpoch::new(epoch.parse().ok()?),
+        })
+    }
+}
+
+fn parse_revision_key(
+    cell: CellId,
+    directory: &str,
+    extension: &str,
+    key: &str,
+) -> Option<(OwnershipEpoch, StorageRevision)> {
+    let prefix = format!("cells/{cell}/{directory}/e");
+    let remainder = key.strip_prefix(&prefix)?;
+    let (epoch, filename) = remainder.split_once('/')?;
+    let sequence = filename.strip_suffix(extension)?;
+    if sequence.len() != 20 || !sequence.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    Some((
+        OwnershipEpoch::new(epoch.parse().ok()?),
+        StorageRevision::new(sequence.parse().ok()?),
+    ))
 }
 
 pub(crate) fn snapshot_key(cell: CellId, epoch: OwnershipEpoch, revision: StorageRevision) -> Path {

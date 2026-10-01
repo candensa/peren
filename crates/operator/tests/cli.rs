@@ -14,6 +14,7 @@ fn parses_setup_and_status_commands() {
         &["peren", "config", "migrate", "wrangler.toml"],
         &["peren", "doctor", "fleet.toml"],
         &["peren", "status", "fleet.toml", "--json"],
+        &["peren", "storage", "prune", "fleet.toml", "--dry-run"],
     ] {
         parses(args);
     }

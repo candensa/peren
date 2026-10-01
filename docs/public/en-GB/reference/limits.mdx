@@ -16,7 +16,7 @@ Fleet `[limits]` values are parsed into the process. Only some fields are applie
 | `max_isolates` | `256` | Enforced as concurrent top-level admission capacity. Must be greater than zero. |
 | `max_cpu_time_ms` | `30000` | Stored only. Not applied on the live HTTP path. |
 | `isolate_fair_share_percent` | `25` | Stored. Validated in `1..=100`. Not wired into the live HTTP path. |
-| `checkpoint_threshold_bytes` | `4194304` (4 MiB) | Stored only. |
+| `checkpoint_threshold_bytes` | `4194304` (4 MiB) | Triggers a cell checkpoint after a dispatch publishes at least this many WAL bytes. |
 | `cron_retry_base_ms` | `2000` | Stored. Validated when cron retries are enabled. Not wired into the live HTTP path. |
 | `cron_retry_max_attempts` | `6` | Stored only. |
 | `cron_retry_max_backoff_ms` | `64000` | Stored only. |
