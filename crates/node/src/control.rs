@@ -21,7 +21,8 @@ use peren_cell::OwnershipLease;
 use peren_replication::ReplicaRepository;
 #[cfg(test)]
 use peren_runtime::{
-    IsolateLimits, Module, ModuleKind, ModuleName, WorkerBundle, WorkerEnvironment,
+    IsolateLimits, Module, ModuleKind, ModuleName, RuntimeKind, RuntimePackage, WorkerBundle,
+    WorkerEnvironment,
 };
 #[cfg(test)]
 use peren_storage::ListOptions as StorageListOptions;
@@ -639,7 +640,7 @@ pub(super) async fn binding(
         }
     };
     let mut harness = socket.clone();
-    harness.bundle = bundle;
+    harness.package = RuntimePackage::new(RuntimeKind::JavaScript, bundle);
     match tokio::task::spawn_blocking(move || {
         let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1181,12 +1182,13 @@ async fn test_dispatch_alarm(
                 .ok_or_else(|| ProcessError::ServiceBundle(service.clone()))?;
             socket
                 .node
-                .dispatch_alarm(
+                .dispatch_alarm_package_with_logs(
                     process::object_cell(&namespace, &id),
-                    target.bundle.clone(),
+                    target.package.clone(),
                     IsolateLimits::new(socket.limits.heap, socket.limits.execution),
                 )
                 .await
+                .map(super::EmptyDispatchResult::discard)
                 .map_err(ProcessError::Node)
         })
     })

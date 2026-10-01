@@ -77,6 +77,10 @@ impl InvocationLimits {
         }
         Ok(())
     }
+
+    pub(crate) const fn cpu_time(self) -> Duration {
+        self.cpu_time
+    }
 }
 
 #[derive(Debug)]

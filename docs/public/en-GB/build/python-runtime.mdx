@@ -1,0 +1,182 @@
+---
+title: "Python runtime design"
+description: "Execution, isolation, packaging and graduation criteria for Python services."
+---
+
+Python services use the same service, binding and lifecycle model as JavaScript services. The app-facing contract is stable: a service sets `runtime = "python"`, points `worker_bundle_path` at a `.py` entry module, and receives Worker APIs through `workers`, `js` and `pyodide.ffi` compatibility modules.
+
+The runtime boundary is deliberately narrower than the execution engine. Python code talks to Peren through a JSON host-call protocol. That protocol owns all durable storage, bindings, outbound fetches, service calls, Durable Object fetches, queue producers, queue consumer dispositions, WebSocket dispatch, cache, AI and workflow state. The executor may change from the current compatibility engine to Pyodide/Wasm without changing user code or binding semantics.
+
+## Production Target
+
+The production engine is Pyodide running inside a WebAssembly runtime: CPython semantics compiled to Wasm, a documented standard-library policy, an ephemeral in-memory filesystem, and all host I/O mediated by Worker bindings rather than by the Python process.
+
+The CPython process executor is a compatibility fallback for local development, CI and staged implementation. It must preserve the same application-facing API as the Pyodide engine, but it is not the production isolation target.
+
+`python_engine = "pyodide"` is the default for Python services. It loads the pinned Pyodide distribution named by `PEREN_PYODIDE_ROOT`. Use `python_engine = "compat"` only when you intentionally want the local CPython fallback for development or CI environments that cannot provide Pyodide artifacts.
+
+## Execution Contract
+
+Every Python invocation receives:
+
+- the entry module source;
+- bundled local Python modules;
+- service variables and hydrated binding metadata;
+- one lifecycle event;
+- a host-call channel owned by the runtime engine.
+
+The executor returns exactly one result envelope. Host calls are synchronous from Python's perspective and asynchronous in Rust. User `print()` output is captured and emitted as worker console events.
+
+Supported lifecycle handlers are:
+
+| Handler | Python method |
+| --- | --- |
+| HTTP | `Default.fetch(self, request)` |
+| Cron | `Default.scheduled(self, event)` |
+| Queue consumer | `Default.queue(self, batch)` |
+| Alarm | `Default.alarm(self)` |
+| Tail | `Default.tail(self, events)` |
+| Workflow | `Default.workflow(self, event)` |
+| Workflow activity | `Default.activity(self, event)` |
+| WebSocket message | `Default.webSocketMessage(self, socket, message)` |
+| WebSocket close | `Default.webSocketClose(self, socket, event)` |
+
+Module-level fallback handlers such as `fetch(request, env, ctx)` remain supported for compatibility.
+
+## Python SDK Surface
+
+New Peren code should import from `workers`:
+
+```py
+from workers import WorkerEntrypoint, Response
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        return Response.json({"ok": True})
+```
+
+Pyodide-style examples may import through `js` and `pyodide.ffi`:
+
+```py
+from js import Response
+from pyodide.ffi import to_js
+
+def fetch(request, env, ctx):
+    return Response.json(to_js({"ok": True}))
+```
+
+Both paths use the same internal objects. The compatibility imports exist so common Pyodide-style examples fail less often for avoidable reasons, but `workers` is the stable Peren SDK namespace.
+
+## Isolation Policy
+
+Python user code must not inherit host process authority. The runtime policy is:
+
+- all durable state goes through bindings or Durable Object storage;
+- local file I/O is ephemeral and scoped to the invocation filesystem;
+- writes outside the invocation filesystem are refused;
+- host process APIs such as `subprocess` are unavailable;
+- raw socket APIs are unavailable;
+- ambient credentials are not exposed to user code;
+- unsupported OS, terminal, UI and process modules are blocked;
+- outbound network I/O goes through `fetch()` or configured bindings;
+- service-to-service and Durable Object calls use the host-call bridge.
+
+The Pyodide/Wasm executor enforces this policy at the Wasm boundary and routes host access through the same binding bridge as JavaScript. The compatibility executor enforces the same application-facing policy in-process before user code runs so local development remains useful without becoming the production isolation model.
+
+## Standard Library Policy
+
+Peren follows a Pyodide-compatible standard-library shape. Most pure Python and portable CPython modules are available. Modules that depend on terminal control, host users/groups, platform registries, process management, native threading, UI stacks or unrestricted system resources are unavailable.
+
+Blocked modules include:
+
+| Category | Modules |
+| --- | --- |
+| Terminal and UI | `curses`, `termios`, `tty`, `pty`, `tkinter`, `turtle`, `turtledemo` |
+| Host accounts and system logs | `grp`, `pwd`, `syslog` |
+| Process and resource control | `fcntl`, `resource`, `subprocess`, `multiprocessing`, `threading` |
+| Platform-specific APIs | `msvcrt`, `winreg`, `winsound` |
+| Packaging and local environments | `ensurepip`, `venv` |
+| Removed or unsupported libraries | `dbm`, `idlelib`, `lib2to3`, `webbrowser` |
+| Raw network escape hatches | `socket` |
+
+Some of these modules may exist in a host CPython installation, but they are not part of Peren's Python runtime contract.
+
+## Packaging
+
+The node bundle loader automatically includes local Python imports rooted next to the entry module:
+
+- `from hello import hello` includes `hello.py`;
+- `import pkg` includes `pkg/__init__.py`;
+- relative imports such as `from .tools import parse` are resolved inside the bundle root.
+
+External package support is locked. Set `python_packages_lock_path` to a JSON file with this shape:
+
+```json
+{
+  "version": 1,
+  "packages": ["micropip", "packaging"]
+}
+```
+
+Peren embeds the lock file in the Worker bundle, so package inputs participate in the deployment digest. Package names must be sorted, unique names available to the pinned Pyodide distribution. URLs, local paths, wheel filenames and version specifiers are refused. Broader wheel support should be added as a separate locked artifact format, not as an ambient network install path.
+
+## Engine Options
+
+| Engine | Status | Release role |
+| --- | --- | --- |
+| Pyodide/Wasm executor | Default Python engine | Runs CPython-in-Wasm, mounts bundled modules into an in-memory filesystem, exposes `workers`, `js` and `pyodide.ffi`, and routes Worker APIs through host calls. |
+| Compatibility CPython executor | Development fallback | Runs each invocation in a scrubbed child process with a Rust-owned temporary working directory, empty user-visible environment, host-call-only I/O, blocked escape modules, wall-clock interruption and best-effort address-space limits where the host platform supports them. |
+
+The Pyodide/Wasm executor is the production target because it keeps Python execution inside a WebAssembly sandbox with a narrow host-call boundary. The executor boots from the distribution named by `PEREN_PYODIDE_ROOT`, mounts bundled Python modules into Pyodide's in-memory filesystem, installs the `workers`, `js` and `pyodide.ffi` compatibility modules, dispatches lifecycle events through Pyodide, and mediates host I/O through Peren bindings. The CPython executor remains useful as a local fallback, but it should not be presented as equivalent to the production isolation model.
+
+## Pyodide/Wasm Executor
+
+The Pyodide executor lives behind the same service-runtime boundary as JavaScript and the compatibility Python executor. It covers:
+
+- HTTP `fetch`;
+- scheduled, queue, alarm, tail, workflow, workflow activity and WebSocket lifecycle dispatch;
+- KV, D1, R2, queue producers, cache, service bindings, Durable Object fetches, outbound fetch, AI and workflow state through the host-call table;
+- Worker-style imports through `workers`, `js` and `pyodide.ffi`;
+- bundled local Python modules mounted into Pyodide's in-memory filesystem.
+
+The executor requires a pinned Pyodide distribution at process start. If artifacts are missing, Peren refuses to load the Pyodide service rather than silently falling back to CPython.
+
+Maintainers can run the real Pyodide qualification suite with:
+
+```sh
+scripts/verify-python-runtime.sh
+```
+
+The script uses `PEREN_PYODIDE_ROOT` when set. Otherwise it downloads the pinned `pyodide` npm package into a temporary directory and runs the ignored executor tests.
+
+## CPython Compatibility Executor
+
+The compatibility executor enforces a baseline process policy so Python services can be developed and tested when Pyodide artifacts are unavailable:
+
+- spawn a dedicated worker process per invocation;
+- clear the inherited environment before process start;
+- clear Python's visible `os.environ` after interpreter startup;
+- set the invocation working directory to a Rust-owned temporary directory;
+- block raw socket, process and resource modules from user imports;
+- route Worker I/O through the host-call bridge;
+- apply the configured wall-clock deadline before user code runs;
+- pass the configured heap limit into the child and apply address-space limits on hosts that support Python's `resource` module;
+- capture stdout as worker console events.
+
+If a deployment explicitly chooses CPython anyway, it should add platform-specific process controls for file-descriptor closure, kernel-level network denial, and external process sandboxing. Python import hooks are defense in depth, not a substitute for the Pyodide/Wasm production target.
+
+## Graduation Criteria
+
+Python runtime support can lose preview language only when all of the following are true:
+
+- stdlib allow/block behavior is covered by tests;
+- package installation is reproducible from locked inputs;
+- lifecycle handlers have runtime tests for success, failure and missing-handler behavior;
+- bindings have parity tests for KV, D1, R2, queues, cache, service bindings, Durable Object fetches, outbound fetch, AI and workflows;
+- queue ack/retry dispositions are tested end to end;
+- WebSocket message and close dispatch are tested through the node bridge;
+- filesystem tests prove ephemeral behavior and escape refusal;
+- request body, response body, wall-clock and memory limits are enforced for Python;
+- docs name the exact engine and policy shipped in the release.
+
+Until those criteria are met, Python services should be documented as preview even when the app-facing API is stable.

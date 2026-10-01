@@ -7,9 +7,9 @@ use peren_replication::{
 };
 use peren_runtime::{
     Capabilities, DurableStorageHost, EngineError, HttpRequest, HttpResponse, InvocationLimits,
-    IsolateLimits, QueueDispatch, QueueEvent, R2BucketHost, ScheduledEvent, TailEvent,
-    WebSocketCloseEvent, WebSocketDispatch, WebSocketMessageEvent, WorkerBundle, WorkerEnvironment,
-    WorkerLogEvent, WorkerRuntime, WorkflowEvent,
+    IsolateLimits, QueueDispatch, QueueEvent, R2BucketHost, RuntimePackage, ScheduledEvent,
+    ServiceRuntime, TailEvent, WebSocketCloseEvent, WebSocketDispatch, WebSocketMessageEvent,
+    WorkerBundle, WorkerEnvironment, WorkerLogEvent, WorkflowEvent,
 };
 use peren_storage::{CellStorage, StorageError};
 use thiserror::Error;
@@ -29,7 +29,7 @@ pub struct WorkerCell<L, R> {
     lease: L,
     storage: Arc<Mutex<CellStorage>>,
     replicator: Replicator<R>,
-    runtime: WorkerRuntime,
+    runtime: ServiceRuntime,
     wal_offset: u64,
     wal_bytes_since_generation: u64,
     generation: peren_primitives::StorageRevision,
@@ -70,9 +70,33 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
     where
         F: FnOnce(Arc<Mutex<CellStorage>>) -> Arc<dyn DurableStorageHost>,
     {
+        Self::activate_package_with_host(
+            path,
+            lease,
+            repository,
+            RuntimePackage::new(peren_runtime::RuntimeKind::JavaScript, bundle),
+            limits,
+            environment,
+            host,
+        )
+        .await
+    }
+
+    pub async fn activate_package_with_host<F>(
+        path: &Path,
+        lease: L,
+        repository: R,
+        package: RuntimePackage,
+        limits: IsolateLimits,
+        environment: WorkerEnvironment,
+        host: F,
+    ) -> Result<Self, CellError>
+    where
+        F: FnOnce(Arc<Mutex<CellStorage>>) -> Arc<dyn DurableStorageHost>,
+    {
         let storage = Arc::new(Mutex::new(CellStorage::open(path)?));
-        let runtime = WorkerRuntime::load_with_environment(
-            bundle,
+        let runtime = ServiceRuntime::load_with_environment(
+            package,
             limits,
             environment,
             host(Arc::clone(&storage)),
@@ -104,10 +128,35 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         F: FnOnce(Arc<Mutex<CellStorage>>) -> Arc<H>,
         H: DurableStorageHost + R2BucketHost + 'static,
     {
+        Self::activate_package_with_r2_host(
+            path,
+            lease,
+            repository,
+            RuntimePackage::new(peren_runtime::RuntimeKind::JavaScript, bundle),
+            limits,
+            environment,
+            host,
+        )
+        .await
+    }
+
+    pub async fn activate_package_with_r2_host<F, H>(
+        path: &Path,
+        lease: L,
+        repository: R,
+        package: RuntimePackage,
+        limits: IsolateLimits,
+        environment: WorkerEnvironment,
+        host: F,
+    ) -> Result<Self, CellError>
+    where
+        F: FnOnce(Arc<Mutex<CellStorage>>) -> Arc<H>,
+        H: DurableStorageHost + R2BucketHost + 'static,
+    {
         let storage = Arc::new(Mutex::new(CellStorage::open(path)?));
         let host = host(Arc::clone(&storage));
         let runtime =
-            WorkerRuntime::load_with_r2(bundle, limits, environment, host.clone(), host).await?;
+            ServiceRuntime::load_with_r2(package, limits, environment, host.clone(), host).await?;
         Ok(Self {
             lease,
             storage,
@@ -143,10 +192,44 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
             + peren_runtime::AiHost
             + 'static,
     {
+        Self::activate_package_with_capabilities(
+            path,
+            lease,
+            repository,
+            RuntimePackage::new(peren_runtime::RuntimeKind::JavaScript, bundle),
+            limits,
+            environment,
+            host,
+        )
+        .await
+    }
+
+    pub async fn activate_package_with_capabilities<F, H>(
+        path: &Path,
+        lease: L,
+        repository: R,
+        package: RuntimePackage,
+        limits: IsolateLimits,
+        environment: WorkerEnvironment,
+        host: F,
+    ) -> Result<Self, CellError>
+    where
+        F: FnOnce(Arc<Mutex<CellStorage>>) -> Arc<H>,
+        H: DurableStorageHost
+            + peren_runtime::OutboundFetchHost
+            + peren_runtime::QueueProducerHost
+            + R2BucketHost
+            + peren_runtime::ServiceBindingHost
+            + peren_runtime::DurableObjectHost
+            + peren_runtime::CacheHost
+            + peren_runtime::KvHost
+            + peren_runtime::AiHost
+            + 'static,
+    {
         let storage = Arc::new(Mutex::new(CellStorage::open(path)?));
         let host = host(Arc::clone(&storage));
-        let runtime = WorkerRuntime::load_with_capabilities(
-            bundle,
+        let runtime = ServiceRuntime::load_with_capabilities(
+            package,
             limits,
             environment,
             Capabilities {

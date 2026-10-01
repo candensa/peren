@@ -14,14 +14,14 @@ use std::{collections::BTreeMap, rc::Rc};
 
 mod dispatch;
 mod error;
-mod host;
+pub(crate) mod host;
 mod script;
-mod watchdog;
+pub(crate) mod watchdog;
 
 pub use error::EngineError;
-use host::{InvocationHosts, web_extensions};
+pub(crate) use host::{InvocationHosts, web_extensions};
 use script::SEAL_INTERNALS;
-use watchdog::Watchdog;
+pub(crate) use watchdog::Watchdog;
 
 deno_core::extension!(
     peren_web,
@@ -128,6 +128,11 @@ impl WorkerEnvironment {
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&str> {
         self.values.get(name).map(String::as_str)
+    }
+
+    #[must_use]
+    pub const fn values(&self) -> &BTreeMap<String, String> {
+        &self.values
     }
 }
 

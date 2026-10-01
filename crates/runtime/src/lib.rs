@@ -8,10 +8,16 @@ mod isolate;
 mod loader;
 mod matrix;
 mod ops;
+mod pyodide;
+mod python;
+mod service;
 mod wire;
 
 pub use budget::{InvocationBudget, InvocationLimits, IsolateLimits, LimitError};
-pub use bundle::{BundleDigest, BundleError, Module, ModuleKind, ModuleName, WorkerBundle};
+pub use bundle::{
+    BundleDigest, BundleError, Module, ModuleKind, ModuleName, PYTHON_PACKAGE_LOCK_MODULE,
+    WorkerBundle,
+};
 pub use compat::{CompatibilityDate, CompatibilityError, NodeCompatibility, ResolvedCompatibility};
 pub use host::{
     AiHost, CacheHost, DurableObjectHost, DurableStorageHost, HostError, InvocationAi,
@@ -24,6 +30,9 @@ pub use isolate::{Capabilities, EngineError, WorkerEnvironment, WorkerRuntime};
 pub use matrix::{
     CAPABILITIES, CapabilityKind, CapabilityStatus, RuntimeCapability, release_blockers,
 };
+pub use pyodide::{PyodideArtifacts, PyodideRuntime, PythonPackageLock};
+pub use python::PythonRuntime;
+pub use service::{PythonEngine, RuntimeKind, RuntimePackage, ServiceRuntime};
 pub use wire::{
     AiRun, AwsSigv4Fetch, CacheEntry, CacheGet, CachePut, DurableObjectFetch, KvGet, KvList, KvPut,
     ListEntry, ListOptions, ListPage, QueueDispatch, QueueDisposition, QueueDispositionKind,

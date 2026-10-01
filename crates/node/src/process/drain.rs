@@ -410,11 +410,11 @@ async fn dispatch_queue_with_host(
         let path = input.path;
         let lease = input.lease;
         let store = input.repository;
-        let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
+        let mut resident = peren_cell::WorkerCell::activate_package_with_capabilities(
             &path,
             lease,
             store,
-            target.bundle,
+            target.package,
             IsolateLimits::new(limits.heap, limits.execution),
             target.environment,
             move |storage| {
@@ -562,6 +562,9 @@ mod tests {
     fn queue_consumers_resolve_defaults_and_overrides() {
         let services = vec![peren_config::Service {
             name: "api".into(),
+            runtime: peren_config::ServiceRuntime::JavaScript,
+            python_engine: peren_config::PythonEngine::Compat,
+            python_packages_lock_path: None,
             worker_bundle_path: std::path::PathBuf::from("worker.js"),
             compatibility_date: "2026-01-01".into(),
             compatibility_flags: Vec::new(),

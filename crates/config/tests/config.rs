@@ -1,5 +1,6 @@
 use peren_config::{
-    BucketKind, ConsoleBackend, CredentialsSource, FleetConfig, QueueBroker, QueueConsumer,
+    BucketKind, ConsoleBackend, CredentialsSource, FleetConfig, PythonEngine, QueueBroker,
+    QueueConsumer, ServiceRuntime,
 };
 
 const MINIMAL: &str = include_str!("../../../tests/fixtures/current/config/minimal.toml");
@@ -16,6 +17,34 @@ fn current_minimal_config_keeps_defaults() {
     assert_eq!(config.raw.routing.ownership_cache_ttl_secs, 45);
     assert_eq!(config.raw.limits.request_body_bytes, 32 * 1024 * 1024);
     assert_eq!(config.services.len(), 1);
+    assert_eq!(config.raw.services[0].runtime, ServiceRuntime::JavaScript);
+    assert_eq!(config.raw.services[0].python_engine, PythonEngine::Pyodide);
+}
+
+#[test]
+fn service_runtime_accepts_python_without_changing_javascript_defaults() {
+    let source = MINIMAL.replace(
+        "worker_bundle_path = \"fixtures/hello.js\"",
+        "runtime = \"python\"\nworker_bundle_path = \"fixtures/hello.py\"",
+    );
+
+    let config = FleetConfig::from_toml(&source).unwrap().validate().unwrap();
+
+    assert_eq!(config.raw.services[0].runtime, ServiceRuntime::Python);
+    assert_eq!(config.raw.services[0].python_engine, PythonEngine::Pyodide);
+}
+
+#[test]
+fn python_runtime_accepts_explicit_compat_engine() {
+    let source = MINIMAL.replace(
+        "worker_bundle_path = \"fixtures/hello.js\"",
+        "runtime = \"python\"\npython_engine = \"compat\"\nworker_bundle_path = \"fixtures/hello.py\"",
+    );
+
+    let config = FleetConfig::from_toml(&source).unwrap().validate().unwrap();
+
+    assert_eq!(config.raw.services[0].runtime, ServiceRuntime::Python);
+    assert_eq!(config.raw.services[0].python_engine, PythonEngine::Compat);
 }
 
 #[test]

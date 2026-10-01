@@ -53,6 +53,7 @@ pub(super) fn descriptor_digest(
                         ModuleKind::JavaScript => "javascript",
                         ModuleKind::CommonJs => "commonjs",
                         ModuleKind::Wasm => "wasm",
+                        ModuleKind::Python => "python",
                     },
                 })
                 .collect(),

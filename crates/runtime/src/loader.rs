@@ -142,6 +142,11 @@ impl ModuleLoader for BundleLoader {
                     None,
                 ));
             }
+            if module.kind() == ModuleKind::Python {
+                return Err(JsErrorBox::generic(format!(
+                    "module {name:?} is a Python module and cannot be loaded by the JavaScript runtime"
+                )));
+            }
             let source = String::from_utf8(module.source().to_vec()).map_err(|_| {
                 JsErrorBox::generic(format!("module {name:?} is not UTF-8 JavaScript"))
             })?;

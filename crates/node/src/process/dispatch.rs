@@ -708,13 +708,14 @@ async fn dispatch_cell_plain(
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
-            let mut resident = peren_cell::WorkerCell::activate(
+            let mut resident = peren_cell::WorkerCell::activate_package_with_host(
                 &path,
                 lease,
                 store,
-                app.bundle,
+                app.package,
                 dispatch.isolate,
                 app.environment,
+                |storage| Arc::new(peren_bindings::SharedStorageHost::new(storage)),
             )
             .await?;
             let dispatch_started = Instant::now();
@@ -837,11 +838,11 @@ async fn dispatch_cell_host(
             let store = input.repository;
             let host_trace_sink = trace_sink.clone();
             let host_trace_context = trace_context.clone();
-            let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
+            let mut resident = peren_cell::WorkerCell::activate_package_with_capabilities(
                 &path,
                 lease,
                 store,
-                app.bundle,
+                app.package,
                 dispatch.isolate,
                 app.environment,
                 move |storage| {
@@ -1009,13 +1010,14 @@ async fn dispatch_websocket_plain(
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
-            let mut resident = peren_cell::WorkerCell::activate(
+            let mut resident = peren_cell::WorkerCell::activate_package_with_host(
                 &path,
                 lease,
                 store,
-                app.bundle,
+                app.package,
                 IsolateLimits::new(app.limits.heap, app.limits.execution),
                 app.environment,
+                |storage| Arc::new(peren_bindings::SharedStorageHost::new(storage)),
             )
             .await?;
             let dispatch = match event {
@@ -1058,11 +1060,11 @@ async fn dispatch_websocket_host(
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
-            let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
+            let mut resident = peren_cell::WorkerCell::activate_package_with_capabilities(
                 &path,
                 lease,
                 store,
-                app.bundle,
+                app.package,
                 IsolateLimits::new(app.limits.heap, app.limits.execution),
                 app.environment,
                 move |storage| {

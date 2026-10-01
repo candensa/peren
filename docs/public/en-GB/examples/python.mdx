@@ -1,0 +1,118 @@
+---
+title: "Python Worker example"
+description: "Run a Python Worker through the same service and socket path as a JavaScript Worker."
+---
+
+Python services use the same fleet shape as JavaScript services. Set `runtime = "python"` and point `worker_bundle_path` at a `.py` entry module.
+
+Create `worker.py`:
+
+```py
+from hello import hello
+from workers import WorkerEntrypoint, Response
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        body = await request.json()
+        name = body.get("name", "Peren")
+        print(f"python handled {name}")
+        return Response(
+            hello(self.env.GREETING, name),
+            status=202,
+            headers={"content-type": "text/plain; charset=utf-8", "x-runtime": "python"},
+        )
+```
+
+Create `hello.py`:
+
+```py
+def hello(greeting, name):
+    return f"{greeting} from Python, {name}\n"
+```
+
+Create `peren.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000201"
+advertise_addr = "127.0.0.1:7201"
+listen = "127.0.0.1:7201"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "hello-python"
+runtime = "python"
+python_engine = "compat"
+worker_bundle_path = "worker.py"
+compatibility_date = "2026-01-01"
+
+[services.vars]
+GREETING = "hello"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "hello-python"
+```
+
+Local Python imports such as `from hello import hello` are included in the Worker bundle automatically when the files are under the service root. Use `[services.additional_modules]` for generated files or unusual layouts that cannot be discovered from imports.
+
+For Pyodide packages, add a lock file and point the service at it:
+
+```json
+{
+  "version": 1,
+  "packages": ["packaging"]
+}
+```
+
+```toml
+python_packages_lock_path = "peren-python-packages.json"
+```
+
+Bindings are available on `self.env`, using the same service config as JavaScript services. For example, a native KV binding can be used from Python:
+
+```py
+from workers import WorkerEntrypoint, Response
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        await self.env.CACHE.put("name", "Peren")
+        return Response(await self.env.CACHE.get("name"))
+```
+
+Run locally:
+
+```sh
+peren devcert ./certs
+peren dev peren.toml
+```
+
+In another terminal, call the `public:` URL printed by `peren dev`:
+
+```sh
+curl -i \
+  --header "Content-Type: application/json" \
+  --request POST \
+  --data '{"name":"Peren"}' \
+  http://127.0.0.1:54321/
+```
+
+The response status is `202` and the body is:
+
+```text
+hello from Python, Peren
+```
+
+The Python runtime supports `fetch`, `scheduled`, `queue`, `alarm`, `tail`, `workflow`, `activity`, `webSocketMessage` and `webSocketClose` handlers in this build. Native KV, D1, R2, queue producers, service bindings, Durable Object namespace fetches, cache, AI, workflow state helpers, WebSocket dispatch, and outbound `fetch()` route through Peren host calls. Creating upgrade responses with `WebSocketPair` remains JavaScript-only.
+
+The runtime boundary is designed for the Pyodide/WebAssembly executor, which is the production target. The compatibility executor keeps the host-call contract, SDK shape, examples, and binding behavior stable for local development environments that cannot provide Pyodide artifacts.
+
+Python code runs with Worker-shaped constraints: unsupported OS and UI modules are blocked, process and socket escape hatches are unavailable, and local file I/O is limited to an ephemeral invocation filesystem.

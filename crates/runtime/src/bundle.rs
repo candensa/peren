@@ -43,6 +43,7 @@ pub(crate) const BUILTIN_NODE_STREAM_PROMISES: &str = "node:stream/promises";
 pub(crate) const BUILTIN_NODE_TEST: &str = "node:test";
 pub(crate) const BUILTIN_NODE_TLS: &str = "node:tls";
 pub(crate) const BUILTIN_NODE_ZLIB: &str = "node:zlib";
+pub const PYTHON_PACKAGE_LOCK_MODULE: &str = "__peren_python_packages.json";
 
 pub(crate) fn is_builtin(specifier: &str) -> bool {
     matches!(
@@ -152,6 +153,7 @@ pub enum ModuleKind {
     JavaScript,
     CommonJs,
     Wasm,
+    Python,
 }
 
 #[derive(Clone, Debug)]
@@ -356,6 +358,7 @@ fn digest(entry: &ModuleName, modules: &BTreeMap<ModuleName, Module>) -> BundleD
             ModuleKind::JavaScript => 0,
             ModuleKind::CommonJs => 1,
             ModuleKind::Wasm => 2,
+            ModuleKind::Python => 3,
         }]);
         hash_field(&mut digest, &module.source);
     }

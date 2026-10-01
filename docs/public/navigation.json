@@ -29,6 +29,7 @@
           "label": "Workers",
           "pages": [
             "build/workers",
+            "build/python-runtime",
             "build/modules",
             "concepts/web",
             "build/assets",
@@ -194,6 +195,7 @@
           "label": "Examples",
           "pages": [
             "examples/http",
+            "examples/python",
             "examples/kv",
             "examples/d1",
             "examples/r2",

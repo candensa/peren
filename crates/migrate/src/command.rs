@@ -2,6 +2,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 use peren_config::{
     Assets, CronTrigger, Entrypoint, FleetConfig, QueueConsumer, RunWorkerFirst, Service,
+    ServiceRuntime,
 };
 use serde::Serialize;
 use thiserror::Error;
@@ -116,6 +117,9 @@ fn service(migrated: MigratedDeployment) -> Result<Service, Error> {
         .ok_or_else(|| Error::CompatibilityDate(migrated.worker_name.clone()))?;
     Ok(Service {
         name: migrated.worker_name,
+        runtime: ServiceRuntime::JavaScript,
+        python_engine: peren_config::PythonEngine::Compat,
+        python_packages_lock_path: None,
         worker_bundle_path: migrated.main_module_path.into(),
         compatibility_date,
         compatibility_flags: migrated.compatibility_flags,

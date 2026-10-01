@@ -3,8 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use peren_config::Service;
-use peren_runtime::{Module, ModuleKind, ModuleName, WorkerBundle};
+use peren_config::{Service, ServiceRuntime};
+use peren_runtime::{
+    Module, ModuleKind, ModuleName, PYTHON_PACKAGE_LOCK_MODULE, PythonPackageLock, WorkerBundle,
+};
 
 use crate::process::ProcessError;
 
@@ -26,16 +28,25 @@ pub(crate) fn load(service: &Service) -> Result<WorkerBundle, ProcessError> {
     let mut index = 0;
     while index < files.len() {
         let (module, path) = files[index].clone();
-        if matches!(kind(&path), ModuleKind::JavaScript | ModuleKind::CommonJs)
-            && let Ok(source) = std::str::from_utf8(&read(&path)?)
-        {
-            for specifier in relative_specifiers(source) {
-                let imported = module.resolve(specifier).map_err(ProcessError::Bundle)?;
-                if files.iter().any(|(name, _)| name == &imported) {
-                    continue;
+        let module_kind = kind(&path);
+        if let Ok(source) = std::str::from_utf8(&read(&path)?) {
+            if matches!(module_kind, ModuleKind::JavaScript | ModuleKind::CommonJs) {
+                for specifier in relative_specifiers(source) {
+                    let imported = module.resolve(specifier).map_err(ProcessError::Bundle)?;
+                    if files.iter().any(|(name, _)| name == &imported) {
+                        continue;
+                    }
+                    let file = import_path(&path, specifier);
+                    if file.is_file() {
+                        files.push((imported, file));
+                    }
                 }
-                let file = import_path(&path, specifier);
-                if file.is_file() {
+            }
+            if module_kind == ModuleKind::Python {
+                for (imported, file) in python_imports(root.as_path(), &path, source)? {
+                    if files.iter().any(|(name, _)| name == &imported) {
+                        continue;
+                    }
                     files.push((imported, file));
                 }
             }
@@ -45,6 +56,16 @@ pub(crate) fn load(service: &Service) -> Result<WorkerBundle, ProcessError> {
     let mut modules = BTreeMap::new();
     for (module, path) in &files {
         modules.insert(module.clone(), Module::new(kind(path), read(path)?)?);
+    }
+    if service.runtime == ServiceRuntime::Python
+        && let Some(path) = &service.python_packages_lock_path
+    {
+        let source = read(path)?;
+        PythonPackageLock::parse(&source).map_err(ProcessError::PythonPackageLock)?;
+        modules.insert(
+            ModuleName::parse(PYTHON_PACKAGE_LOCK_MODULE)?,
+            Module::new(ModuleKind::JavaScript, source)?,
+        );
     }
     WorkerBundle::new(entry, modules).map_err(ProcessError::Bundle)
 }
@@ -105,6 +126,87 @@ fn import_path(from: &Path, specifier: &str) -> PathBuf {
         }
     }
     path
+}
+
+fn python_imports(
+    root: &Path,
+    from: &Path,
+    source: &str,
+) -> Result<Vec<(ModuleName, PathBuf)>, ProcessError> {
+    let mut found = Vec::new();
+    for line in source.lines() {
+        let line = line.trim_start();
+        let candidates = if let Some(rest) = line.strip_prefix("from ") {
+            let Some((module, _)) = rest.split_once(" import ") else {
+                continue;
+            };
+            vec![module.trim()]
+        } else if let Some(rest) = line.strip_prefix("import ") {
+            rest.split(',')
+                .filter_map(|part| part.split_whitespace().next())
+                .collect::<Vec<_>>()
+        } else {
+            continue;
+        };
+        for candidate in candidates {
+            if candidate.is_empty() || candidate.contains('*') {
+                continue;
+            }
+            if candidate.starts_with('.') {
+                if let Some((module, file)) = relative_python_import(root, from, candidate)? {
+                    found.push((module, file));
+                }
+            } else if let Some((module, file)) = absolute_python_import(root, candidate)? {
+                found.push((module, file));
+            }
+        }
+    }
+    Ok(found)
+}
+
+fn relative_python_import(
+    root: &Path,
+    from: &Path,
+    specifier: &str,
+) -> Result<Option<(ModuleName, PathBuf)>, ProcessError> {
+    let dots = specifier.chars().take_while(|value| *value == '.').count();
+    let rest = &specifier[dots..];
+    let mut base = from.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
+    for _ in 1..dots {
+        base.pop();
+    }
+    if !rest.is_empty() {
+        for component in rest.split('.') {
+            base.push(component);
+        }
+    }
+    python_module_at(root, &base)
+}
+
+fn absolute_python_import(
+    root: &Path,
+    specifier: &str,
+) -> Result<Option<(ModuleName, PathBuf)>, ProcessError> {
+    let mut path = root.to_path_buf();
+    for component in specifier.split('.') {
+        path.push(component);
+    }
+    python_module_at(root, &path)
+}
+
+fn python_module_at(
+    root: &Path,
+    base: &Path,
+) -> Result<Option<(ModuleName, PathBuf)>, ProcessError> {
+    let file = base.with_extension("py");
+    if file.is_file() {
+        return Ok(Some((name(root, &file)?, file)));
+    }
+    let init = base.join("__init__.py");
+    if init.is_file() {
+        return Ok(Some((name(root, &init)?, init)));
+    }
+    Ok(None)
 }
 
 fn relative_specifiers(source: &str) -> Vec<&str> {
@@ -172,6 +274,7 @@ fn kind(path: &Path) -> ModuleKind {
     match path.extension().and_then(|extension| extension.to_str()) {
         Some("cjs") => ModuleKind::CommonJs,
         Some("wasm") => ModuleKind::Wasm,
+        Some("py") => ModuleKind::Python,
         _ => ModuleKind::JavaScript,
     }
 }
@@ -271,6 +374,157 @@ compatibility_date = "2026-01-01"
                 .module(&ModuleName::parse("answer.wasm").unwrap())
                 .is_some()
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn load_follows_local_python_imports() {
+        let root = std::env::temp_dir().join(format!("peren-python-import-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("pkg")).unwrap();
+        let entry = root.join("worker.py");
+        let hello = root.join("hello.py");
+        let pkg = root.join("pkg").join("__init__.py");
+        std::fs::write(
+            &entry,
+            "from hello import hello\nimport pkg\nfrom missing import ignored\n",
+        )
+        .unwrap();
+        std::fs::write(&hello, "def hello(): return 'hello'\n").unwrap();
+        std::fs::write(&pkg, "value = 'pkg'\n").unwrap();
+        let config = format!(
+            r#"
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:0"
+listen = "127.0.0.1:0"
+[bucket]
+kind = "memory"
+[mtls]
+ca_cert_path = "ca.pem"
+leaf_cert_path = "leaf.pem"
+leaf_key_path = "key.pem"
+[[services]]
+name = "api"
+runtime = "python"
+worker_bundle_path = "{}"
+compatibility_date = "2026-01-01"
+"#,
+            entry.display()
+        );
+        let config = toml::from_str::<peren_config::FleetConfig>(&config)
+            .unwrap()
+            .validate()
+            .unwrap();
+
+        let bundle = load(&config.raw.services[0]).unwrap();
+
+        assert!(
+            bundle
+                .module(&ModuleName::parse("worker.py").unwrap())
+                .is_some()
+        );
+        assert!(
+            bundle
+                .module(&ModuleName::parse("hello.py").unwrap())
+                .is_some()
+        );
+        assert!(
+            bundle
+                .module(&ModuleName::parse("pkg/__init__.py").unwrap())
+                .is_some()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn load_embeds_python_package_lock() {
+        let root = std::env::temp_dir().join(format!("peren-python-lock-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = root.join("worker.py");
+        let lock = root.join("peren-python-packages.json");
+        std::fs::write(&entry, "from workers import Response\n").unwrap();
+        std::fs::write(&lock, r#"{"version":1,"packages":["micropip"]}"#).unwrap();
+        let config = format!(
+            r#"
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:0"
+listen = "127.0.0.1:0"
+[bucket]
+kind = "memory"
+[mtls]
+ca_cert_path = "ca.pem"
+leaf_cert_path = "leaf.pem"
+leaf_key_path = "key.pem"
+[[services]]
+name = "api"
+runtime = "python"
+worker_bundle_path = "{}"
+python_packages_lock_path = "{}"
+compatibility_date = "2026-01-01"
+"#,
+            entry.display(),
+            lock.display()
+        );
+        let config = toml::from_str::<peren_config::FleetConfig>(&config)
+            .unwrap()
+            .validate()
+            .unwrap();
+
+        let bundle = load(&config.raw.services[0]).unwrap();
+        let lock_module = bundle
+            .module(&ModuleName::parse(PYTHON_PACKAGE_LOCK_MODULE).unwrap())
+            .unwrap();
+
+        assert_eq!(
+            lock_module.source(),
+            br#"{"version":1,"packages":["micropip"]}"#
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn load_rejects_unsafe_python_package_lock() {
+        let root = std::env::temp_dir().join(format!("peren-python-bad-lock-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let entry = root.join("worker.py");
+        let lock = root.join("peren-python-packages.json");
+        std::fs::write(&entry, "from workers import Response\n").unwrap();
+        std::fs::write(
+            &lock,
+            r#"{"version":1,"packages":["https://example.invalid/pkg.whl"]}"#,
+        )
+        .unwrap();
+        let config = format!(
+            r#"
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:0"
+listen = "127.0.0.1:0"
+[bucket]
+kind = "memory"
+[mtls]
+ca_cert_path = "ca.pem"
+leaf_cert_path = "leaf.pem"
+leaf_key_path = "key.pem"
+[[services]]
+name = "api"
+runtime = "python"
+worker_bundle_path = "{}"
+python_packages_lock_path = "{}"
+compatibility_date = "2026-01-01"
+"#,
+            entry.display(),
+            lock.display()
+        );
+        let config = toml::from_str::<peren_config::FleetConfig>(&config)
+            .unwrap()
+            .validate()
+            .unwrap();
+
+        let error = load(&config.raw.services[0]).unwrap_err();
+
+        assert!(error.to_string().contains("Python package lock"), "{error}");
         std::fs::remove_dir_all(root).unwrap();
     }
 }

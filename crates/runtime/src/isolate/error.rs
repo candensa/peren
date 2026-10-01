@@ -9,6 +9,8 @@ pub enum EngineError {
     Limit(#[from] LimitError),
     #[error("JavaScript execution failed: {0}")]
     JavaScript(String),
+    #[error("Python execution failed: {0}")]
+    Python(String),
     #[error("Worker module has no default export")]
     MissingEntrypoint,
     #[error("Worker default export must provide a fetch function")]
@@ -19,6 +21,13 @@ pub enum EngineError {
     HeapLimit,
     #[error("Worker exceeded its execution-time limit")]
     ExecutionTime,
+    #[error("{0} runtime is not supported by this build")]
+    UnsupportedRuntime(&'static str),
+    #[error("{runtime} runtime does not support {feature}")]
+    UnsupportedRuntimeFeature {
+        runtime: &'static str,
+        feature: &'static str,
+    },
     #[error("execution watchdog failed")]
     Watchdog,
     #[error("request serialization failed: {0}")]

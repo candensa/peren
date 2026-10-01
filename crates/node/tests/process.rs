@@ -69,6 +69,46 @@ async fn public_listener_dispatches_to_worker_runtime() {
 }
 
 #[tokio::test]
+async fn public_listener_dispatches_to_python_runtime() {
+    let root = tempfile::tempdir().unwrap();
+    let worker = root.path().join("worker.py");
+    std::fs::write(
+        &worker,
+        r#"
+from workers import WorkerEntrypoint, Response
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        body = await request.text()
+        print("python handled " + body)
+        return Response("python:" + body, status=202, headers={"x-runtime": "python"})
+"#,
+    )
+    .unwrap();
+    let environment = DataEnv::new();
+    let process = Process::start(config::python_worker(&worker), &environment)
+        .await
+        .unwrap();
+    let address = process.listeners()["public"];
+
+    let response = request(
+        address,
+        "POST /python HTTP/1.1\r\nhost: localhost\r\ncontent-length: 5\r\nconnection: close\r\n\r\nperen",
+    )
+    .await;
+
+    assert!(response.starts_with("HTTP/1.1 202"), "{response}");
+    assert!(response.contains("x-runtime: python"), "{response}");
+    assert!(response.ends_with("python:peren"), "{response}");
+    let tail = std::fs::read_to_string(environment.path().join("tail/events.jsonl")).unwrap();
+    assert!(
+        tail.contains(r#""message":"python handled peren""#),
+        "{tail}"
+    );
+    process.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn public_listener_captures_worker_console_logs_with_severity() {
     let worker = TestWorker::from_source(
         "export default { async fetch() {

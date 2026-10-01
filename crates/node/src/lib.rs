@@ -7,8 +7,8 @@ use peren_replication::{
     DurableReceipt, ReplicaImage, ReplicaRepository, Replicator, RepositoryError as ReplicaError,
 };
 use peren_runtime::{
-    HttpRequest, HttpResponse, InvocationLimits, IsolateLimits, QueueEvent, ScheduledEvent,
-    TailEvent, WorkerBundle, WorkerEnvironment, WorkflowEvent,
+    HttpRequest, HttpResponse, InvocationLimits, IsolateLimits, QueueEvent, RuntimeKind,
+    RuntimePackage, ScheduledEvent, TailEvent, WorkerBundle, WorkerEnvironment, WorkflowEvent,
 };
 use std::sync::Mutex;
 use thiserror::Error;
@@ -302,12 +302,40 @@ impl<R: NodeRepository> Node<R> {
         invocation: InvocationLimits,
         environment: WorkerEnvironment,
     ) -> Result<HttpResponse, NodeError> {
+        self.dispatch_http_package(
+            cell,
+            request,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+            invocation,
+            environment,
+        )
+        .await
+    }
+
+    pub async fn dispatch_http_package(
+        &self,
+        cell: CellId,
+        request: HttpRequest,
+        package: RuntimePackage,
+        isolate: IsolateLimits,
+        invocation: InvocationLimits,
+        environment: WorkerEnvironment,
+    ) -> Result<HttpResponse, NodeError> {
         self.restore_and_dispatch(cell, |input| async move {
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
-            let mut resident =
-                WorkerCell::activate(&path, lease, store, bundle, isolate, environment).await?;
+            let mut resident = WorkerCell::activate_package_with_host(
+                &path,
+                lease,
+                store,
+                package,
+                isolate,
+                environment,
+                |storage| Arc::new(peren_bindings::SharedStorageHost::new(storage)),
+            )
+            .await?;
             let response = resident.dispatch_http(request, invocation).await?;
             resident.release().await?;
             Ok(response)
@@ -321,15 +349,34 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<(), NodeError> {
-        self.dispatch_alarm_with_logs(cell, bundle, isolate)
-            .await
-            .map(EmptyDispatchResult::discard)
+        self.dispatch_alarm_package_with_logs(
+            cell,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+        )
+        .await
+        .map(EmptyDispatchResult::discard)
     }
 
+    #[cfg(test)]
     pub(crate) async fn dispatch_alarm_with_logs(
         &self,
         cell: CellId,
         bundle: WorkerBundle,
+        isolate: IsolateLimits,
+    ) -> Result<EmptyDispatchResult, NodeError> {
+        self.dispatch_alarm_package_with_logs(
+            cell,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+        )
+        .await
+    }
+
+    pub(crate) async fn dispatch_alarm_package_with_logs(
+        &self,
+        cell: CellId,
+        package: RuntimePackage,
         isolate: IsolateLimits,
     ) -> Result<EmptyDispatchResult, NodeError> {
         let _alarm = self.enter_alarm(cell)?;
@@ -337,13 +384,14 @@ impl<R: NodeRepository> Node<R> {
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
-            let mut resident = WorkerCell::activate(
+            let mut resident = WorkerCell::activate_package_with_host(
                 &path,
                 lease,
                 store,
-                bundle,
+                package,
                 isolate,
                 WorkerEnvironment::empty(),
+                |storage| Arc::new(peren_bindings::SharedStorageHost::new(storage)),
             )
             .await?;
             resident.dispatch_alarm().await?;
@@ -361,11 +409,17 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<(), NodeError> {
-        self.dispatch_scheduled_with_logs(cell, event, bundle, isolate)
-            .await
-            .map(EmptyDispatchResult::discard)
+        self.dispatch_scheduled_package_with_logs(
+            cell,
+            event,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+        )
+        .await
+        .map(EmptyDispatchResult::discard)
     }
 
+    #[cfg(test)]
     pub(crate) async fn dispatch_scheduled_with_logs(
         &self,
         cell: CellId,
@@ -373,17 +427,34 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<EmptyDispatchResult, NodeError> {
+        self.dispatch_scheduled_package_with_logs(
+            cell,
+            event,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+        )
+        .await
+    }
+
+    pub(crate) async fn dispatch_scheduled_package_with_logs(
+        &self,
+        cell: CellId,
+        event: ScheduledEvent,
+        package: RuntimePackage,
+        isolate: IsolateLimits,
+    ) -> Result<EmptyDispatchResult, NodeError> {
         self.restore_and_dispatch(cell, |input| async move {
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
-            let mut resident = WorkerCell::activate(
+            let mut resident = WorkerCell::activate_package_with_host(
                 &path,
                 lease,
                 store,
-                bundle,
+                package,
                 isolate,
                 WorkerEnvironment::empty(),
+                |storage| Arc::new(peren_bindings::SharedStorageHost::new(storage)),
             )
             .await?;
             resident.dispatch_scheduled(event).await?;
@@ -401,29 +472,35 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<peren_runtime::QueueDispatch, NodeError> {
-        self.dispatch_queue_with_logs(cell, event, bundle, isolate)
-            .await
-            .map(|result| result.dispatch)
+        self.dispatch_queue_package_with_logs(
+            cell,
+            event,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+        )
+        .await
+        .map(|result| result.dispatch)
     }
 
-    pub(crate) async fn dispatch_queue_with_logs(
+    pub(crate) async fn dispatch_queue_package_with_logs(
         &self,
         cell: CellId,
         event: QueueEvent,
-        bundle: WorkerBundle,
+        package: RuntimePackage,
         isolate: IsolateLimits,
     ) -> Result<QueueDispatchResult, NodeError> {
         self.restore_and_dispatch(cell, |input| async move {
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
-            let mut resident = WorkerCell::activate(
+            let mut resident = WorkerCell::activate_package_with_host(
                 &path,
                 lease,
                 store,
-                bundle,
+                package,
                 isolate,
                 WorkerEnvironment::empty(),
+                |storage| Arc::new(peren_bindings::SharedStorageHost::new(storage)),
             )
             .await?;
             let dispatch = resident.dispatch_queue(event).await?;
@@ -440,11 +517,17 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<(), NodeError> {
-        self.dispatch_tail_with_logs(cell, event, bundle, isolate)
-            .await
-            .map(EmptyDispatchResult::discard)
+        self.dispatch_tail_package_with_logs(
+            cell,
+            event,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+        )
+        .await
+        .map(EmptyDispatchResult::discard)
     }
 
+    #[cfg(test)]
     pub(crate) async fn dispatch_tail_with_logs(
         &self,
         cell: CellId,
@@ -452,17 +535,34 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<EmptyDispatchResult, NodeError> {
+        self.dispatch_tail_package_with_logs(
+            cell,
+            event,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+        )
+        .await
+    }
+
+    pub(crate) async fn dispatch_tail_package_with_logs(
+        &self,
+        cell: CellId,
+        event: TailEvent,
+        package: RuntimePackage,
+        isolate: IsolateLimits,
+    ) -> Result<EmptyDispatchResult, NodeError> {
         self.restore_and_dispatch(cell, |input| async move {
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
-            let mut resident = WorkerCell::activate(
+            let mut resident = WorkerCell::activate_package_with_host(
                 &path,
                 lease,
                 store,
-                bundle,
+                package,
                 isolate,
                 WorkerEnvironment::empty(),
+                |storage| Arc::new(peren_bindings::SharedStorageHost::new(storage)),
             )
             .await?;
             resident.dispatch_tail(event).await?;
@@ -480,11 +580,17 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<(), NodeError> {
-        self.dispatch_workflow_with_logs(cell, event, bundle, isolate)
-            .await
-            .map(EmptyDispatchResult::discard)
+        self.dispatch_workflow_package_with_logs(
+            cell,
+            event,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+        )
+        .await
+        .map(EmptyDispatchResult::discard)
     }
 
+    #[cfg(test)]
     pub(crate) async fn dispatch_workflow_with_logs(
         &self,
         cell: CellId,
@@ -492,17 +598,34 @@ impl<R: NodeRepository> Node<R> {
         bundle: WorkerBundle,
         isolate: IsolateLimits,
     ) -> Result<EmptyDispatchResult, NodeError> {
+        self.dispatch_workflow_package_with_logs(
+            cell,
+            event,
+            RuntimePackage::new(RuntimeKind::JavaScript, bundle),
+            isolate,
+        )
+        .await
+    }
+
+    pub(crate) async fn dispatch_workflow_package_with_logs(
+        &self,
+        cell: CellId,
+        event: WorkflowEvent,
+        package: RuntimePackage,
+        isolate: IsolateLimits,
+    ) -> Result<EmptyDispatchResult, NodeError> {
         self.restore_and_dispatch(cell, |input| async move {
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
-            let mut resident = WorkerCell::activate(
+            let mut resident = WorkerCell::activate_package_with_host(
                 &path,
                 lease,
                 store,
-                bundle,
+                package,
                 isolate,
                 WorkerEnvironment::empty(),
+                |storage| Arc::new(peren_bindings::SharedStorageHost::new(storage)),
             )
             .await?;
             resident.dispatch_workflow(event).await?;

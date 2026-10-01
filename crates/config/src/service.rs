@@ -126,6 +126,12 @@ pub struct DispatchBucket {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Service {
     pub name: String,
+    #[serde(default)]
+    pub runtime: ServiceRuntime,
+    #[serde(default)]
+    pub python_engine: PythonEngine,
+    #[serde(default)]
+    pub python_packages_lock_path: Option<PathBuf>,
     pub worker_bundle_path: PathBuf,
     pub compatibility_date: String,
     #[serde(default)]
@@ -176,6 +182,22 @@ pub struct Service {
     pub project_id: Option<String>,
     #[serde(default)]
     pub placement_regions: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceRuntime {
+    #[default]
+    JavaScript,
+    Python,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PythonEngine {
+    Compat,
+    #[default]
+    Pyodide,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

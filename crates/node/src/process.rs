@@ -12,7 +12,7 @@ use std::{
 use peren_config::{Cache, DispatchNamespace, R2EventType, Service, ValidatedConfig};
 use peren_primitives::NodeId;
 use peren_provider_object_store::{R2Store, S3Credentials, S3Options};
-use peren_runtime::{WorkerBundle, WorkerEnvironment};
+use peren_runtime::{PythonEngine, RuntimeKind, RuntimePackage, WorkerEnvironment};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -57,7 +57,7 @@ pub(super) struct App {
 #[derive(Clone)]
 pub(super) struct SocketApp {
     pub(super) node: Node<Repository>,
-    pub(super) bundle: WorkerBundle,
+    pub(super) package: RuntimePackage,
     pub(super) service: Arc<str>,
     pub(super) limits: Limits,
     pub(super) checkpoint_threshold_bytes: u64,
@@ -86,7 +86,7 @@ pub(super) struct SocketApp {
 
 #[derive(Clone)]
 pub(super) struct ServiceTarget {
-    pub(super) bundle: WorkerBundle,
+    pub(super) package: RuntimePackage,
     pub(super) environment: WorkerEnvironment,
     pub(super) checkpoint_threshold_bytes: u64,
     d1: BTreeMap<String, D1Route>,
@@ -262,8 +262,8 @@ impl Process {
         let data = environment
             .get("PEREN_DATA_DIR")
             .map_or_else(default_data, PathBuf::from);
-        let bundles = bundles(&config.raw.services, &config.raw.dispatch_namespaces)?;
-        Self::start_with_providers(config, providers, inherited, data, bundles, options).await
+        let packages = runtime_packages(&config.raw.services, &config.raw.dispatch_namespaces)?;
+        Self::start_with_providers(config, providers, inherited, data, packages, options).await
     }
 
     #[allow(
@@ -275,7 +275,7 @@ impl Process {
         providers: Providers,
         mut inherited: BTreeMap<String, std::net::TcpListener>,
         data: PathBuf,
-        bundles: BTreeMap<String, WorkerBundle>,
+        packages: BTreeMap<String, RuntimePackage>,
         options: ProcessOptions,
     ) -> Result<Self, ProcessError> {
         let shutdown_deadline = Duration::from_secs(config.raw.shutdown.evacuation_deadline_secs);
@@ -303,7 +303,7 @@ impl Process {
             Arc::clone(&telemetry),
             admission.clone(),
         )?;
-        let services = Arc::new(service_targets(&bundles, &context));
+        let services = Arc::new(service_targets(&packages, &context));
         let objects = Arc::new(durable_services(&control_config.raw.services));
         let registry = Arc::new(StdMutex::new(BTreeMap::new()));
 
@@ -345,7 +345,7 @@ impl Process {
             let service = socket_services
                 .get(&name)
                 .ok_or_else(|| ProcessError::SocketService(name.clone()))?;
-            let bundle = bundles
+            let package = packages
                 .get(service)
                 .ok_or_else(|| ProcessError::ServiceBundle(service.clone()))?
                 .clone();
@@ -401,7 +401,7 @@ impl Process {
                             trace: trace.clone(),
                             admission: admission.clone(),
                         },
-                        bundle,
+                        package,
                         service,
                     )),
                 },
@@ -546,10 +546,10 @@ fn process_context(
     })
 }
 
-fn socket_app(context: SocketContext<'_>, bundle: WorkerBundle, service: &str) -> SocketApp {
+fn socket_app(context: SocketContext<'_>, package: RuntimePackage, service: &str) -> SocketApp {
     SocketApp {
         node: Node::new(context.node, context.data.join("cells"), context.repository),
-        bundle,
+        package,
         service: Arc::from(service),
         limits: context.limits,
         checkpoint_threshold_bytes: context
@@ -795,16 +795,16 @@ fn url_host(url: &str) -> Option<String> {
 }
 
 fn service_targets(
-    bundles: &BTreeMap<String, WorkerBundle>,
+    packages: &BTreeMap<String, RuntimePackage>,
     context: &ProcessContext,
 ) -> BTreeMap<String, ServiceTarget> {
-    bundles
+    packages
         .iter()
-        .map(|(name, bundle)| {
+        .map(|(name, package)| {
             (
                 name.clone(),
                 ServiceTarget {
-                    bundle: bundle.clone(),
+                    package: package.clone(),
                     environment: context
                         .environments
                         .get(name)
@@ -927,21 +927,50 @@ fn socket_services(sockets: &[peren_config::Socket]) -> BTreeMap<String, String>
         .collect()
 }
 
-fn bundles(
+fn runtime_packages(
     services: &[Service],
     dispatch_namespaces: &[DispatchNamespace],
-) -> Result<BTreeMap<String, WorkerBundle>, ProcessError> {
-    let mut bundles = services
+) -> Result<BTreeMap<String, RuntimePackage>, ProcessError> {
+    let mut packages = services
         .iter()
-        .map(|service| bundle::load(service).map(|bundle| (service.name.clone(), bundle)))
+        .map(|service| {
+            bundle::load(service).map(|bundle| {
+                (
+                    service.name.clone(),
+                    RuntimePackage::new(
+                        runtime_kind(service.runtime, service.python_engine),
+                        bundle,
+                    ),
+                )
+            })
+        })
         .collect::<Result<BTreeMap<_, _>, ProcessError>>()?;
     for namespace in dispatch_namespaces {
         for script in &namespace.scripts {
             let name = format!("{}/{}", namespace.name, script.name);
-            bundles.insert(name, bundle::load_path(&script.worker_bundle_path)?);
+            packages.insert(
+                name,
+                RuntimePackage::new(
+                    RuntimeKind::JavaScript,
+                    bundle::load_path(&script.worker_bundle_path)?,
+                ),
+            );
         }
     }
-    Ok(bundles)
+    Ok(packages)
+}
+
+fn runtime_kind(
+    runtime: peren_config::ServiceRuntime,
+    python_engine: peren_config::PythonEngine,
+) -> RuntimeKind {
+    match runtime {
+        peren_config::ServiceRuntime::JavaScript => RuntimeKind::JavaScript,
+        peren_config::ServiceRuntime::Python => RuntimeKind::Python(match python_engine {
+            peren_config::PythonEngine::Compat => PythonEngine::Compat,
+            peren_config::PythonEngine::Pyodide => PythonEngine::Pyodide,
+        }),
+    }
 }
 
 async fn turso_routes(

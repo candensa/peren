@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
 };
 use peren_config::QueueBroker;
-use peren_runtime::BundleError;
+use peren_runtime::{BundleError, EngineError};
 use thiserror::Error;
 
 use crate::{ProviderError, SupervisorError};
@@ -49,6 +49,8 @@ pub enum ProcessError {
     ModulePath(PathBuf),
     #[error(transparent)]
     Bundle(#[from] BundleError),
+    #[error("Python package lock is invalid")]
+    PythonPackageLock(#[source] EngineError),
     #[error("worker environment could not be serialized")]
     Environment(#[source] serde_json::Error),
     #[error("configured limit {0} does not fit this platform")]

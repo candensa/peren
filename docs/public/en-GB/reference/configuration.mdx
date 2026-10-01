@@ -286,7 +286,10 @@ At least one service is required. Each entry is one Worker bundle and its bindin
 | Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
 | --- | --- | --- | --- | --- | --- | --- |
 | `services[].name` | string | yes | none | 1–63 ASCII letters, digits, `-`, `_` | sockets, bindings, admission | invalid or duplicate name fails validation |
-| `services[].worker_bundle_path` | path | yes | none | path to `.js`, `.cjs`, or `.wasm` | isolate loader | missing file fails at startup |
+| `services[].runtime` | enum | no | `javascript` | `javascript`, `python` | runtime selection for the service | unknown runtime fails parse |
+| `services[].python_engine` | enum | no | `pyodide` | `pyodide`, `compat` | Python executor selection | `pyodide` loads the Wasm executor from `PEREN_PYODIDE_ROOT`; `compat` is the explicit local fallback |
+| `services[].python_packages_lock_path` | path | no | unset | JSON lock file with `version = 1` shape | Python package loading | invalid JSON, unsupported version, URLs, wheel paths, version specs, duplicate or unsorted packages fail at startup |
+| `services[].worker_bundle_path` | path | yes | none | path to `.js`, `.cjs`, `.py`, or `.wasm` | runtime loader | missing file fails at startup; `.wasm` cannot be the entry module |
 | `services[].compatibility_date` | date string | yes | none | `YYYY-MM-DD` | compatibility resolution | invalid date fails validation |
 | `services[].compatibility_flags` | array of strings | no | `[]` | flag names | compatibility resolution | unknown combinations follow compatibility resolution rules |
 | `services[].vars` | string map | no | empty | string values | `env` plain variables | type errors fail parse |
@@ -310,6 +313,30 @@ At least one service is required. Each entry is one Worker bundle and its bindin
 | `services[].workflow_retention_days` | u64 | no | unset | non-negative integer | accepted | type errors fail parse |
 | `services[].deploy_max_resident_age_secs` | u64 | no | unset | non-negative integer | accepted | type errors fail parse |
 | `services[].max_steps_per_instance` | u64 | no | unset | non-negative integer | accepted | type errors fail parse |
+
+When `runtime` is omitted, Peren uses the JavaScript runtime. Set `runtime = "python"` for a Python entry module:
+
+```toml
+[[services]]
+name = "api"
+runtime = "python"
+python_engine = "compat"
+worker_bundle_path = "worker.py"
+compatibility_date = "2026-01-01"
+```
+
+`python_engine = "pyodide"` selects the production engine and is the default for Python services. Set `PEREN_PYODIDE_ROOT` to a pinned Pyodide distribution containing `pyodide.mjs`, `pyodide.asm.js`, `pyodide.asm.wasm`, `python_stdlib.zip`, and `pyodide-lock.json`. `python_engine = "compat"` opts into the development CPython compatibility executor.
+
+Use `python_packages_lock_path` when the service needs Pyodide packages:
+
+```json
+{
+  "version": 1,
+  "packages": ["micropip", "packaging"]
+}
+```
+
+Packages must be sorted, unique package names available to the pinned Pyodide distribution. URLs, paths, wheel filenames and version specifiers are refused.
 
 ### `[services.entrypoint]`
 

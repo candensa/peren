@@ -5,11 +5,26 @@ description: "Worker handlers, request context and enforced runtime limits."
 
 What Peren calls on a Worker, what `ctx` contains, and which limits apply. For the programming model, see [Workers](/docs/build/workers/). For web globals, see [Web platform APIs](/docs/concepts/web/).
 
+## Runtime selection
+
+Services run on the JavaScript runtime unless `runtime` is set on the service. Python services use `runtime = "python"` and a `.py` entry module. For the production engine and sandbox plan, see [Python runtime design](/docs/build/python-runtime/).
+
+```toml
+[[services]]
+name = "api"
+runtime = "python"
+python_engine = "pyodide" # default; requires PEREN_PYODIDE_ROOT
+worker_bundle_path = "worker.py"
+compatibility_date = "2026-01-01"
+```
+
 ## Entry
 
-Peren loads `export default` as the Worker entry. The entry module must be JavaScript or CommonJS. A `.wasm` path as the entry is refused. Additional modules may be JavaScript, CommonJS (`.cjs`) or WebAssembly (`.wasm`).
+For JavaScript services, Peren loads `export default` as the Worker entry. The entry module must be JavaScript or CommonJS. A `.wasm` path as the entry is refused. Additional modules may be JavaScript, CommonJS (`.cjs`) or WebAssembly (`.wasm`).
 
 If the default export has no `fetch` function and no fetch listener is registered, isolate load fails with a TypeError requiring `fetch`.
+
+For Python services, Peren executes the entry module and calls methods on `Default(WorkerEntrypoint)`. The class must define `fetch(self, request)` for ordinary HTTP dispatch. Handlers may be synchronous functions or `async` functions. Module-level functions such as `fetch(request, env, ctx)` remain accepted as a compatibility fallback.
 
 ## Handlers
 
@@ -26,6 +41,40 @@ If the default export has no `fetch` function and no fetch listener is registere
 | `webSocketClose` | `(socket, code, reason, wasClean, env, ctx) => unknown` | After an upgraded WebSocket closes. |
 
 Listener fallbacks via `addEventListener` exist for `fetch`, `scheduled`, `queue`, `tail`, `webSocketMessage` and `webSocketClose` when the corresponding default-export method is absent.
+
+Python services use the same handler names as the table as methods on `Default`: `fetch`, `scheduled`, `queue`, `alarm`, `tail`, `workflow`, `activity`, `webSocketMessage` and `webSocketClose` are available in this build. Module-level handlers with `(event, env, ctx)` arguments remain accepted.
+
+Python entry modules receive `WorkerEntrypoint`, `Request`, `Response`, `Headers`, `ctx.waitUntil`, and hydrated binding objects from the `workers` module:
+
+```py
+from workers import WorkerEntrypoint, Response
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        body = await request.text()
+        print("handled", body)
+        return Response("ok", status=202, headers={"x-runtime": "python"})
+```
+
+For Pyodide-style examples, Peren also installs a compatibility `js` module with `Request`, `Response`, `Headers`, `WebSocket`, `fetch` and `caches`, plus `pyodide.ffi.to_js` / `to_py` passthrough helpers. Prefer `workers` for new Peren code because it is the stable SDK surface.
+
+### Python Bindings
+
+Python services hydrate configured bindings on `self.env` using the same metadata as JavaScript services. Native KV, D1, R2, queue producers, service bindings, Durable Object namespace fetches, cache, AI, workflow state helpers, and outbound `fetch()` use Peren host calls rather than direct host access from Python code.
+
+Python WebSocket dispatch receives a `WebSocket` object with `id`, `send(message)`, `close()`, and `readyState`. Outbound frames sent during `webSocketMessage` or `webSocketClose` are returned through Peren's shared dispatch bridge. Creating upgrade responses with `WebSocketPair` remains JavaScript-only.
+
+### Python Execution Model
+
+The Python runtime boundary is a JSON host-call protocol between Python code and Peren's Rust hosts. That protocol is the stable contract for runtime parity and keeps bindings, lifecycle dispatch, and examples aligned across the Pyodide and compatibility engines.
+
+The default engine is Pyodide/Wasm, which gives Python services a WebAssembly sandbox, an in-memory filesystem, Pyodide package behavior, and a documented standard-library policy. The compatibility executor uses the system `python3` interpreter and should be treated as a development fallback, not as the production isolation model.
+
+Both engines apply the same Worker-facing constraints:
+
+- Documented runtime exclusions such as `curses`, `dbm`, `ensurepip`, `fcntl`, `multiprocessing`, `threading`, `tkinter`, `venv`, `webbrowser` and platform-specific modules are blocked.
+- Host process and socket modules such as `subprocess` and `socket` are blocked; use bindings or `fetch()` for I/O.
+- File I/O is relative to an ephemeral invocation filesystem. Writes outside that filesystem are refused, and data is lost after the invocation.
 
 ### RPC
 
@@ -52,6 +101,8 @@ ctx.waitUntil(promise);
 | Hydrated bindings | binding objects by configured name |
 
 Peren does not leave internal binding or cache objects on `env`. The global `caches` object comes from `[cache]`, not from `env`. Service assets are served by the node for matching static paths and are not placed on `env`.
+
+Python services receive plain variables and secrets as attributes on `self.env`. Binding metadata is consumed by the runtime boundary and is not exposed as an application variable.
 
 ## Limits
 

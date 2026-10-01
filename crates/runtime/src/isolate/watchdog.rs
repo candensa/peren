@@ -6,14 +6,14 @@ use std::sync::{
 };
 use std::thread::JoinHandle;
 
-pub(super) struct Watchdog {
+pub(crate) struct Watchdog {
     state: Arc<(Mutex<bool>, Condvar)>,
     expired: Arc<AtomicBool>,
     thread: JoinHandle<()>,
 }
 
 impl Watchdog {
-    pub(super) fn start(runtime: &mut JsRuntime, limit: std::time::Duration) -> Self {
+    pub(crate) fn start(runtime: &mut JsRuntime, limit: std::time::Duration) -> Self {
         let state = Arc::new((Mutex::new(false), Condvar::new()));
         let expired = Arc::new(AtomicBool::new(false));
         let handle = runtime.v8_isolate().thread_safe_handle();
@@ -39,7 +39,7 @@ impl Watchdog {
         }
     }
 
-    pub(super) fn finish(
+    pub(crate) fn finish(
         self,
         runtime: &mut JsRuntime,
         heap_exceeded: &AtomicBool,

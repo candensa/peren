@@ -11,7 +11,7 @@ mod embedded_deno_sources {
     include!(concat!(env!("OUT_DIR"), "/embedded_deno_sources.rs"));
 }
 
-pub(super) struct InvocationHosts {
+pub(crate) struct InvocationHosts {
     pub(super) storage: InvocationStorage,
     pub(super) fetch: InvocationFetch,
     pub(super) queue: InvocationQueue,
@@ -24,6 +24,45 @@ pub(super) struct InvocationHosts {
 }
 
 impl InvocationHosts {
+    pub(crate) fn empty() -> Self {
+        Self::from_hosts(Hosts::default())
+    }
+
+    pub(crate) fn from_capabilities(capabilities: crate::Capabilities) -> Self {
+        Self {
+            storage: InvocationStorage::new(capabilities.storage),
+            fetch: capabilities.fetch.map_or_else(
+                || InvocationFetch::new(Arc::new(NoFetch)),
+                InvocationFetch::new,
+            ),
+            queue: capabilities.queue.map_or_else(
+                || InvocationQueue::new(Arc::new(NoQueue)),
+                InvocationQueue::new,
+            ),
+            r2: capabilities
+                .r2
+                .map_or_else(|| InvocationR2::new(Arc::new(NoR2)), InvocationR2::new),
+            service: capabilities.service.map_or_else(
+                || InvocationService::new(Arc::new(NoService)),
+                InvocationService::new,
+            ),
+            durable: capabilities.durable.map_or_else(
+                || InvocationDurableObject::new(Arc::new(NoDurableObject)),
+                InvocationDurableObject::new,
+            ),
+            cache: capabilities.cache.map_or_else(
+                || InvocationCache::new(Arc::new(NoCache)),
+                InvocationCache::new,
+            ),
+            kv: capabilities
+                .kv
+                .map_or_else(|| InvocationKv::new(Arc::new(NoKv)), InvocationKv::new),
+            ai: capabilities
+                .ai
+                .map_or_else(|| InvocationAi::new(Arc::new(NoAi)), InvocationAi::new),
+        }
+    }
+
     pub(super) fn from_hosts(hosts: Hosts) -> Self {
         Self {
             storage: hosts.storage.map_or_else(
@@ -63,7 +102,7 @@ impl InvocationHosts {
     }
 }
 
-pub(super) fn web_extensions(hosts: InvocationHosts) -> Vec<Extension> {
+pub(crate) fn web_extensions(hosts: InvocationHosts) -> Vec<Extension> {
     let mut extensions = vec![
         peren_storage::init(hosts),
         deno_webidl::deno_webidl::init(),

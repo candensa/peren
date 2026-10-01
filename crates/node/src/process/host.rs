@@ -555,11 +555,11 @@ async fn dispatch_service(
             let store = input.repository;
             let host_trace = trace.clone();
             let host_trace_context = trace_context.clone();
-            let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
+            let mut resident = peren_cell::WorkerCell::activate_package_with_capabilities(
                 &path,
                 lease,
                 store,
-                target.bundle,
+                target.package,
                 isolate,
                 target.environment,
                 move |storage| {
@@ -786,11 +786,11 @@ async fn dispatch_object(
             let store = input.repository;
             let host_trace = trace.clone();
             let host_trace_context = trace_context.clone();
-            let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
+            let mut resident = peren_cell::WorkerCell::activate_package_with_capabilities(
                 &path,
                 lease,
                 store,
-                target.bundle,
+                target.package,
                 isolate,
                 target.environment,
                 move |storage| {
