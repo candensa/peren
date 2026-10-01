@@ -170,11 +170,11 @@ peren dev <config> [--profile peren|wrangler] [--env <name>] [--wrangler <path>]
 | --- | --- | --- | --- |
 | `<config>` | required | — | Fleet TOML path |
 | `--profile <profile>` | optional | `peren` | Use `wrangler` when `<config>` is a Wrangler config |
-| `--env <name>` | optional | none | Environment name for profile-specific local env files |
+| `--env <name>` | optional | none | Environment name for Wrangler local env files |
 | `--wrangler <path>` | optional | none | Repeatable Wrangler overlays |
 | `--json` | optional | off | Print topology as JSON instead of human lines |
 
-**State.** Loads config and local env files from the config directory. The default `peren` profile reads `.dev.vars`. The `wrangler` profile reads `.dev.vars` or `.dev.vars.<env>` first; when no matching `.dev.vars` file exists, it reads `.env`, `.env.<env>`, `.env.local`, and `.env.<env>.local` in order. Wrangler tool variables with `CLOUDFLARE_`, `WRANGLER_`, or `MINIFLARE_` prefixes are not exposed to Worker code from `.env` files. Preparation forces a memory bucket and rebinds loopback listeners to port 0, then starts the process until shutdown. The file on disk is unchanged. `peren serve` keeps the configured bucket and ports.
+**State.** Loads config and local env files from the config directory. The default `peren` profile reads `.dev.vars`; `--env` has no effect in this profile. The `wrangler` profile, or a command with `--wrangler` overlays and no explicit profile, reads `.dev.vars` or `.dev.vars.<env>` first. When no matching `.dev.vars` file exists, it reads `.env`, `.env.<env>`, `.env.local`, and `.env.<env>.local` in order. Wrangler tool variables with `CLOUDFLARE_`, `WRANGLER_`, or `MINIFLARE_` prefixes are not exposed to Worker code from `.env` files. Preparation forces a memory bucket and rebinds loopback listeners to port 0, then starts the process until shutdown. The file on disk is unchanged. `peren serve` keeps the configured bucket and ports.
 
 **Output.** Without `--json`, representative lines:
 
@@ -210,11 +210,11 @@ peren test-server <config> [--profile peren|wrangler] [--env <name>] [--wrangler
 | --- | --- | --- | --- |
 | `<config>` | required | — | Fleet TOML path |
 | `--profile <profile>` | optional | `peren` | Use `wrangler` when `<config>` is a Wrangler config |
-| `--env <name>` | optional | none | Environment name for profile-specific local env files |
+| `--env <name>` | optional | none | Environment name for Wrangler local env files |
 | `--wrangler <path>` | optional | none | Repeatable Wrangler overlays |
 | `--json` | optional | off | Accepted. Readiness output is always JSON. |
 
-**State.** Same local process start path and local env profile handling as `peren dev`, until shutdown.
+**State.** Same local process start path and local env profile handling as `peren dev`, including the Wrangler env profile for `--profile wrangler` or `--wrangler` overlays when no profile is explicit. `--env` has no effect with the `peren` profile.
 
 **Output.** One JSON object with `ready`, `sockets`, and `topology`.
 

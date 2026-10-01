@@ -47,7 +47,14 @@ impl Session {
         let env_profile = env_profile(command);
         let imported = match source_profile {
             SourceProfile::Peren => peren_migrate::load_raw(&command.config, &command.wrangler)?,
-            SourceProfile::Wrangler => load_wrangler_config(&command.config)?,
+            SourceProfile::Wrangler => {
+                if !command.wrangler.is_empty() {
+                    return Err(super::CliError::Unsupported(
+                        "--profile wrangler does not accept --wrangler overlays",
+                    ));
+                }
+                load_wrangler_config(&command.config)?
+            }
         };
         super::emit_notices(imported.notices);
         let base = command
@@ -149,10 +156,9 @@ fn source_profile(command: &cli::Worker) -> SourceProfile {
 
 fn env_profile(command: &cli::Worker) -> LocalEnvProfile {
     match command.profile {
-        Some(cli::DevProfile::Wrangler) => LocalEnvProfile::Wrangler,
         Some(cli::DevProfile::Peren) => LocalEnvProfile::Peren,
         None if command.wrangler.is_empty() => LocalEnvProfile::Peren,
-        None => LocalEnvProfile::Wrangler,
+        Some(cli::DevProfile::Wrangler) | None => LocalEnvProfile::Wrangler,
     }
 }
 
@@ -377,6 +383,24 @@ compatibility_date = "2026-01-01"
         assert_eq!(imported.value.sockets.len(), 1);
         assert_eq!(imported.value.sockets[0].name, "public");
         assert_eq!(imported.value.sockets[0].service, "api");
+    }
+
+    #[test]
+    fn wrangler_profile_rejects_overlay_configs() {
+        let command = cli::Worker {
+            config: PathBuf::from("wrangler.toml"),
+            wrangler: vec![PathBuf::from("overlay.toml")],
+            profile: Some(cli::DevProfile::Wrangler),
+            environment: None,
+            json: false,
+        };
+
+        let error = match Session::load(&command) {
+            Ok(_) => panic!("expected --profile wrangler with overlays to fail"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(error.contains("--profile wrangler does not accept --wrangler overlays"));
     }
 
     fn temp_dir() -> PathBuf {
