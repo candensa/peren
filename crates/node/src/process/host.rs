@@ -27,6 +27,7 @@ use crate::{
         AwsBinding, Limits, ObjectRegistry, QueueBrokerState, R2NotificationRule, ServiceTarget,
         turso_routes,
     },
+    trace::{self, SpanKind, SpanRecord, TraceContext, TraceSink},
 };
 
 #[derive(Clone)]
@@ -44,6 +45,8 @@ pub(super) struct ProcessHost {
     pub(super) cache: CacheStore,
     pub(super) limits: Limits,
     pub(super) telemetry: Arc<Telemetry>,
+    pub(super) trace: TraceSink,
+    pub(super) trace_context: Option<TraceContext>,
 }
 
 impl ProcessHost {
@@ -393,6 +396,9 @@ fn request_host(url: &reqwest::Url) -> Option<String> {
 impl ServiceBindingHost for ProcessHost {
     async fn fetch(&self, fetch: ServiceFetch) -> Result<HttpResponse, HostError> {
         let started = Instant::now();
+        let started_at_ms = trace::now_ms();
+        let service = fetch.service.clone();
+        let span = self.trace_context.as_ref().map(TraceContext::child);
         let host = self.clone();
         let result = tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -411,10 +417,47 @@ impl ServiceBindingHost for ProcessHost {
         match result {
             Ok(response) => {
                 Telemetry::inc(&self.telemetry.service_fetches);
+                if let Some(span) = span.as_ref() {
+                    let _ = self.trace.record_span(
+                        span,
+                        SpanRecord {
+                            service: &service,
+                            cell: None,
+                            name: "service.fetch",
+                            kind: SpanKind::Client,
+                            started,
+                            started_at_ms,
+                            outcome: if response.status >= 500 {
+                                "error"
+                            } else {
+                                "ok"
+                            },
+                            attributes: BTreeMap::from([(
+                                "http.response.status_code".into(),
+                                response.status.to_string(),
+                            )]),
+                        },
+                    );
+                }
                 Ok(response)
             }
             Err(error) => {
                 Telemetry::inc(&self.telemetry.service_errors);
+                if let Some(span) = span.as_ref() {
+                    let _ = self.trace.record_span(
+                        span,
+                        SpanRecord {
+                            service: &service,
+                            cell: None,
+                            name: "service.fetch",
+                            kind: SpanKind::Client,
+                            started,
+                            started_at_ms,
+                            outcome: "error",
+                            attributes: BTreeMap::new(),
+                        },
+                    );
+                }
                 Err(error)
             }
         }
@@ -441,6 +484,8 @@ async fn dispatch_service(
     let node = host.node.clone();
     let registry = Arc::clone(&host.registry);
     let limits = host.limits;
+    let trace = host.trace.clone();
+    let trace_context = host.trace_context.as_ref().map(TraceContext::child);
     host.node
         .restore_and_dispatch(cell(&fetch.service, path), |input| async move {
             let path = input.path;
@@ -475,6 +520,8 @@ async fn dispatch_service(
                         cache,
                         limits,
                         telemetry: Arc::clone(&host.telemetry),
+                        trace: trace.clone(),
+                        trace_context: trace_context.as_ref().map(TraceContext::child),
                     })
                 },
             )
@@ -491,6 +538,11 @@ async fn dispatch_service(
 impl DurableObjectHost for ProcessHost {
     async fn fetch(&self, fetch: DurableObjectFetch) -> Result<HttpResponse, HostError> {
         let started = Instant::now();
+        let started_at_ms = trace::now_ms();
+        let class_name = fetch.class_name.clone();
+        let namespace = fetch.namespace.clone();
+        let object_id = fetch.id.clone();
+        let span = self.trace_context.as_ref().map(TraceContext::child);
         let host = self.clone();
         let result = tokio::task::spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -509,10 +561,54 @@ impl DurableObjectHost for ProcessHost {
         match result {
             Ok(response) => {
                 Telemetry::inc(&self.telemetry.object_fetches);
+                if let Some(span) = span.as_ref() {
+                    let _ = self.trace.record_span(
+                        span,
+                        SpanRecord {
+                            service: &class_name,
+                            cell: Some(&object_cell(&namespace, &object_id).to_string()),
+                            name: "durable_object.fetch",
+                            kind: SpanKind::Client,
+                            started,
+                            started_at_ms,
+                            outcome: if response.status >= 500 {
+                                "error"
+                            } else {
+                                "ok"
+                            },
+                            attributes: BTreeMap::from([
+                                ("peren.do.class".into(), class_name.clone()),
+                                ("peren.do.namespace".into(), namespace.clone()),
+                                (
+                                    "http.response.status_code".into(),
+                                    response.status.to_string(),
+                                ),
+                            ]),
+                        },
+                    );
+                }
                 Ok(response)
             }
             Err(error) => {
                 Telemetry::inc(&self.telemetry.object_errors);
+                if let Some(span) = span.as_ref() {
+                    let _ = self.trace.record_span(
+                        span,
+                        SpanRecord {
+                            service: &class_name,
+                            cell: Some(&object_cell(&namespace, &object_id).to_string()),
+                            name: "durable_object.fetch",
+                            kind: SpanKind::Client,
+                            started,
+                            started_at_ms,
+                            outcome: "error",
+                            attributes: BTreeMap::from([
+                                ("peren.do.class".into(), class_name.clone()),
+                                ("peren.do.namespace".into(), namespace.clone()),
+                            ]),
+                        },
+                    );
+                }
                 Err(error)
             }
         }
@@ -543,6 +639,8 @@ async fn dispatch_object(
     let node = host.node.clone();
     let registry = Arc::clone(&host.registry);
     let limits = host.limits;
+    let trace = host.trace.clone();
+    let trace_context = host.trace_context.as_ref().map(TraceContext::child);
     host.node
         .restore_and_dispatch(
             object_cell(&fetch.namespace, &fetch.id),
@@ -579,6 +677,8 @@ async fn dispatch_object(
                             cache,
                             limits,
                             telemetry: Arc::clone(&host.telemetry),
+                            trace: trace.clone(),
+                            trace_context: trace_context.as_ref().map(TraceContext::child),
                         })
                     },
                 )

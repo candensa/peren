@@ -16,6 +16,19 @@ A cell keeps its mutable state in SQLite on the owning node. After a dispatch co
 
 `Peren.storage.mutation` records the callback result under the mutation id. A later call with the same id returns the stored result and does not run the callback again.
 
+## Lifecycle trace points
+
+Each mutable dispatch passes through the same observable lifecycle:
+
+| Span | Meaning |
+| --- | --- |
+| `cell.restore` | The node acquired ownership and prepared the local SQLite image from an empty or restored replica. |
+| `cell.dispatch` | The Worker invocation ran against the activated cell. |
+| `cell.commit` | The dispatch published a durable checkpoint. Emitted only when a commit happened. |
+| `cell.release` | The resident finished and released its lease resources. |
+
+Service binding fetches and Durable Object fetches propagate the incoming trace id into the child cell dispatch. Use `peren trace fleet.toml --request-id ...` to inspect the local lifecycle stream, or configure `[otlp]` to export spans to an OTLP collector.
+
 ## Ownership fencing
 
 A cell has one current owner for mutable work. Peren records ownership with a conditional write on the bucket. Publish and checkpoint refuse when the stored owner is empty or the epoch no longer matches the lease. A fenced cell stops accepting mutable dispatch rather than writing under a stale epoch.

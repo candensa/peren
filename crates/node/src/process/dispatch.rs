@@ -38,7 +38,9 @@ use crate::{
     host::RoutedHost,
     metrics::Telemetry,
     process::{App, ProcessError, ProcessHost, SocketApp, cell, has_binding, turso_routes},
-    tail, websocket,
+    tail,
+    trace::{self, SpanKind, SpanRecord, TraceContext},
+    websocket,
     websocket::Session as WebSocketSession,
 };
 
@@ -431,6 +433,7 @@ pub(super) struct Dispatch {
     isolate: IsolateLimits,
     invocation: InvocationLimits,
     host: bool,
+    trace: TraceContext,
 }
 
 struct DispatchResult {
@@ -438,6 +441,10 @@ struct DispatchResult {
     logs: Vec<peren_runtime::WorkerLogEvent>,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "HTTP ingress records tail, asset, websocket and trace lifecycle state in one request boundary"
+)]
 pub(crate) async fn dispatch_worker(
     app: SocketApp,
     method: Method,
@@ -459,6 +466,12 @@ pub(crate) async fn dispatch_worker(
     let request_id = uuid::Uuid::new_v4().to_string();
     let dispatch_id = uuid::Uuid::new_v4().to_string();
     let traceparent = traceparent(&headers);
+    let trace = TraceContext::ingress(
+        traceparent.as_deref(),
+        request_id.clone(),
+        dispatch_id.clone(),
+        app.sampling_ratio,
+    );
     let worker_first = app
         .assets
         .as_ref()
@@ -466,6 +479,30 @@ pub(crate) async fn dispatch_worker(
     if !worker_first
         && let Some(response) = asset::serve(app.assets.as_ref(), &method, uri.path()).await?
     {
+        app.trace.record_span(
+            &trace,
+            SpanRecord {
+                service: &service_name,
+                cell: None,
+                name: "http.asset",
+                kind: SpanKind::Server,
+                started,
+                started_at_ms: trace::now_ms(),
+                outcome: if response.status().as_u16() >= 500 {
+                    "error"
+                } else {
+                    "ok"
+                },
+                attributes: BTreeMap::from([
+                    ("http.request.method".into(), method_name.clone()),
+                    ("url.path".into(), path.clone()),
+                    (
+                        "http.response.status_code".into(),
+                        response.status().as_u16().to_string(),
+                    ),
+                ]),
+            },
+        )?;
         record_tail(TailRecord {
             tail: &tail_path,
             service: &service_name,
@@ -486,6 +523,7 @@ pub(crate) async fn dispatch_worker(
         isolate: IsolateLimits::new(app.limits.heap, app.limits.execution),
         invocation: InvocationLimits::new(app.limits.body, app.limits.subrequests),
         host: uses_host(&app),
+        trace,
     };
     let websocket_sessions = Arc::clone(&app.websocket_sessions);
     let telemetry = Arc::clone(&app.telemetry);
@@ -624,12 +662,39 @@ async fn dispatch_cell(app: SocketApp, dispatch: Dispatch) -> Result<DispatchRes
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "plain cell dispatch keeps restore, invoke, commit and release trace points together"
+)]
 async fn dispatch_cell_plain(
     app: SocketApp,
     dispatch: Dispatch,
 ) -> Result<DispatchResult, ProcessError> {
+    let service = app.service.to_string();
+    let trace_sink = app.trace.clone();
+    let trace_context = dispatch.trace.clone();
     app.node
         .restore_and_dispatch(dispatch.cell, |input| async move {
+            let cell_id = dispatch.cell.to_string();
+            let restore_started = Instant::now();
+            let restore_started_at_ms = trace::now_ms();
+            let restore_source = match &input.restore.source {
+                crate::RestoreSource::Empty => "empty".to_string(),
+                crate::RestoreSource::Restored { .. } => "restored".to_string(),
+            };
+            let _ = trace_sink.record_span(
+                &trace_context.child(),
+                SpanRecord {
+                    service: &service,
+                    cell: Some(&cell_id),
+                    name: "cell.restore",
+                    kind: SpanKind::Internal,
+                    started: restore_started,
+                    started_at_ms: restore_started_at_ms,
+                    outcome: "ok",
+                    attributes: BTreeMap::from([("peren.restore.source".into(), restore_source)]),
+                },
+            );
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
@@ -642,17 +707,77 @@ async fn dispatch_cell_plain(
                 app.environment,
             )
             .await?;
+            let dispatch_started = Instant::now();
+            let dispatch_started_at_ms = trace::now_ms();
             let response = resident
                 .dispatch_http(dispatch.request, dispatch.invocation)
                 .await?;
+            let commit = resident.last_commit();
+            let _ = trace_sink.record_span(
+                &trace_context.child(),
+                SpanRecord {
+                    service: &service,
+                    cell: Some(&cell_id),
+                    name: "cell.dispatch",
+                    kind: SpanKind::Server,
+                    started: dispatch_started,
+                    started_at_ms: dispatch_started_at_ms,
+                    outcome: if response.status >= 500 {
+                        "error"
+                    } else {
+                        "ok"
+                    },
+                    attributes: BTreeMap::from([(
+                        "http.response.status_code".into(),
+                        response.status.to_string(),
+                    )]),
+                },
+            );
+            if let Some(commit) = commit {
+                let _ = trace_sink.record_span(
+                    &trace_context.child(),
+                    SpanRecord {
+                        service: &service,
+                        cell: Some(&cell_id),
+                        name: "cell.commit",
+                        kind: SpanKind::Internal,
+                        started: Instant::now(),
+                        started_at_ms: trace::now_ms(),
+                        outcome: "ok",
+                        attributes: BTreeMap::from([(
+                            "peren.storage.revision".into(),
+                            commit.revision.get().to_string(),
+                        )]),
+                    },
+                );
+            }
             let logs = resident.take_console_events();
+            let release_started = Instant::now();
+            let release_started_at_ms = trace::now_ms();
             resident.release().await?;
+            let _ = trace_sink.record_span(
+                &trace_context.child(),
+                SpanRecord {
+                    service: &service,
+                    cell: Some(&cell_id),
+                    name: "cell.release",
+                    kind: SpanKind::Internal,
+                    started: release_started,
+                    started_at_ms: release_started_at_ms,
+                    outcome: "ok",
+                    attributes: BTreeMap::new(),
+                },
+            );
             Ok(DispatchResult { response, logs })
         })
         .await
         .map_err(ProcessError::Node)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "host cell dispatch mirrors capability wiring and lifecycle trace points"
+)]
 async fn dispatch_cell_host(
     app: SocketApp,
     dispatch: Dispatch,
@@ -669,12 +794,36 @@ async fn dispatch_cell_host(
     let registry = Arc::clone(&app.registry);
     let node = app.node.clone();
     let limits = app.limits;
+    let trace_sink = app.trace.clone();
+    let trace_context = dispatch.trace.clone();
 
     app.node
         .restore_and_dispatch(dispatch.cell, |input| async move {
+            let cell_id = dispatch.cell.to_string();
+            let restore_started = Instant::now();
+            let restore_started_at_ms = trace::now_ms();
+            let restore_source = match &input.restore.source {
+                crate::RestoreSource::Empty => "empty".to_string(),
+                crate::RestoreSource::Restored { .. } => "restored".to_string(),
+            };
+            let _ = trace_sink.record_span(
+                &trace_context.child(),
+                SpanRecord {
+                    service: &app.service,
+                    cell: Some(&cell_id),
+                    name: "cell.restore",
+                    kind: SpanKind::Internal,
+                    started: restore_started,
+                    started_at_ms: restore_started_at_ms,
+                    outcome: "ok",
+                    attributes: BTreeMap::from([("peren.restore.source".into(), restore_source)]),
+                },
+            );
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
+            let host_trace_sink = trace_sink.clone();
+            let host_trace_context = trace_context.clone();
             let mut resident = peren_cell::WorkerCell::activate_with_capabilities(
                 &path,
                 lease,
@@ -704,15 +853,73 @@ async fn dispatch_cell_host(
                         cache,
                         limits,
                         telemetry: Arc::clone(&app.telemetry),
+                        trace: host_trace_sink.clone(),
+                        trace_context: Some(host_trace_context.child()),
                     })
                 },
             )
             .await?;
+            let dispatch_started = Instant::now();
+            let dispatch_started_at_ms = trace::now_ms();
             let response = resident
                 .dispatch_http(dispatch.request, dispatch.invocation)
                 .await?;
+            let commit = resident.last_commit();
+            let _ = trace_sink.record_span(
+                &trace_context.child(),
+                SpanRecord {
+                    service: &app.service,
+                    cell: Some(&dispatch.cell.to_string()),
+                    name: "cell.dispatch",
+                    kind: SpanKind::Server,
+                    started: dispatch_started,
+                    started_at_ms: dispatch_started_at_ms,
+                    outcome: if response.status >= 500 {
+                        "error"
+                    } else {
+                        "ok"
+                    },
+                    attributes: BTreeMap::from([(
+                        "http.response.status_code".into(),
+                        response.status.to_string(),
+                    )]),
+                },
+            );
+            if let Some(commit) = commit {
+                let _ = trace_sink.record_span(
+                    &trace_context.child(),
+                    SpanRecord {
+                        service: &app.service,
+                        cell: Some(&dispatch.cell.to_string()),
+                        name: "cell.commit",
+                        kind: SpanKind::Internal,
+                        started: Instant::now(),
+                        started_at_ms: trace::now_ms(),
+                        outcome: "ok",
+                        attributes: BTreeMap::from([(
+                            "peren.storage.revision".into(),
+                            commit.revision.get().to_string(),
+                        )]),
+                    },
+                );
+            }
             let logs = resident.take_console_events();
+            let release_started = Instant::now();
+            let release_started_at_ms = trace::now_ms();
             resident.release().await?;
+            let _ = trace_sink.record_span(
+                &trace_context.child(),
+                SpanRecord {
+                    service: &app.service,
+                    cell: Some(&dispatch.cell.to_string()),
+                    name: "cell.release",
+                    kind: SpanKind::Internal,
+                    started: release_started,
+                    started_at_ms: release_started_at_ms,
+                    outcome: "ok",
+                    attributes: BTreeMap::new(),
+                },
+            );
             Ok(DispatchResult { response, logs })
         })
         .await
@@ -861,6 +1068,8 @@ async fn dispatch_websocket_host(
                         cache,
                         limits,
                         telemetry: Arc::clone(&app.telemetry),
+                        trace: app.trace.clone(),
+                        trace_context: None,
                     })
                 },
             )

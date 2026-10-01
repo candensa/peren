@@ -36,6 +36,7 @@ mod supervisor;
 mod tail;
 mod tenant;
 mod tls;
+mod trace;
 mod upgrade;
 mod websocket;
 mod workflow;
@@ -112,6 +113,10 @@ pub use tenant::{
     DeleteReport as TenantDeleteReport, Deletion as TenantDeletion, Revocation as TenantRevocation,
     Revoke as TenantRevoke, RevokeReport as TenantRevokeReport, TenantError,
     delete as delete_tenant, revoke as revoke_tenant,
+};
+pub use trace::{
+    Event as TraceEvent, Read as TraceRead, Report as TraceReport, SpanKind as TraceSpanKind,
+    TraceError, read as read_trace,
 };
 pub use upgrade::{
     Check as UpgradeCheck, CheckReport as UpgradeCheckReport, Plan as UpgradePlan,

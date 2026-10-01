@@ -95,6 +95,8 @@ pub enum ProcessError {
     Node(#[from] crate::NodeError),
     #[error(transparent)]
     Tail(#[from] crate::TailError),
+    #[error(transparent)]
+    Trace(#[from] crate::TraceError),
 }
 
 impl IntoResponse for ProcessError {

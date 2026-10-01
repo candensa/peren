@@ -16,7 +16,7 @@ use peren_runtime::{
 
 use crate::{
     Node, Repository, Shutdown, Supervisor, TaskError, admission::Admission, metrics::Telemetry,
-    tail,
+    tail, trace,
 };
 
 use crate::host::RoutedHost;
@@ -36,6 +36,7 @@ struct QueueDrainer {
     telemetry: Arc<Telemetry>,
     admission: Admission,
     tail: PathBuf,
+    trace: PathBuf,
     cache: CacheStore,
     services: Arc<BTreeMap<String, ServiceTarget>>,
     objects: Arc<BTreeMap<String, String>>,
@@ -143,6 +144,7 @@ pub(super) fn spawn_queue_consumers(
                 let telemetry = Arc::clone(&context.telemetry);
                 let admission = context.admission.clone();
                 let tail = context.data.join("tail");
+                let trace = context.data.join("traces");
                 let drainer = QueueDrainer {
                     node,
                     queues,
@@ -153,6 +155,7 @@ pub(super) fn spawn_queue_consumers(
                     telemetry,
                     admission,
                     tail,
+                    trace,
                     cache: context.cache.clone(),
                     services: Arc::clone(services),
                     objects: Arc::clone(objects),
@@ -188,6 +191,7 @@ fn queue_thread(shutdown: Shutdown, drainer: QueueDrainer) -> Result<(), TaskErr
         drainer.telemetry,
         drainer.admission,
         drainer.tail,
+        drainer.trace,
         drainer.cache,
         drainer.services,
         drainer.objects,
@@ -210,6 +214,7 @@ async fn queue_loop(
     telemetry: Arc<Telemetry>,
     admission: Admission,
     tail: PathBuf,
+    trace_path: PathBuf,
     cache: CacheStore,
     services: Arc<BTreeMap<String, ServiceTarget>>,
     objects: Arc<BTreeMap<String, String>>,
@@ -230,6 +235,7 @@ async fn queue_loop(
                     Arc::clone(&telemetry),
                     admission.clone(),
                     tail.clone(),
+                    trace_path.clone(),
                     cache.clone(),
                     Arc::clone(&services),
                     Arc::clone(&objects),
@@ -255,6 +261,7 @@ async fn queue_tick_inner(
     telemetry: Arc<Telemetry>,
     admission: Admission,
     tail: PathBuf,
+    trace_path: PathBuf,
     cache: CacheStore,
     services: Arc<BTreeMap<String, ServiceTarget>>,
     objects: Arc<BTreeMap<String, String>>,
@@ -298,6 +305,7 @@ async fn queue_tick_inner(
         limits,
         Arc::clone(&telemetry),
         cache,
+        trace_path,
         services,
         objects,
         registry,
@@ -383,6 +391,7 @@ async fn dispatch_queue_with_host(
     limits: Limits,
     telemetry: Arc<Telemetry>,
     cache: CacheStore,
+    trace_path: PathBuf,
     services: Arc<BTreeMap<String, ServiceTarget>>,
     objects: Arc<BTreeMap<String, String>>,
     registry: ObjectRegistry,
@@ -430,6 +439,8 @@ async fn dispatch_queue_with_host(
                     cache,
                     limits,
                     telemetry,
+                    trace: trace::TraceSink::local(trace_path),
+                    trace_context: None,
                 })
             },
         )
