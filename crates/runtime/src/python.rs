@@ -666,7 +666,13 @@ def load_module(payload):
     return module
 
 def entrypoint(module, env, ctx):
-    entry = getattr(module, "Default", None)
+    class_name = globals().get("__perenDurableClass")
+    if class_name:
+        entry = getattr(module, class_name, None)
+        if entry is None:
+            raise TypeError(f"Python entrypoint must define {class_name}")
+    else:
+        entry = getattr(module, "Default", None)
     if entry is None:
         return None
     instance = entry()
@@ -717,6 +723,7 @@ async def invoke(payload):
         signal.signal(signal.SIGALRM, timeout_handler)
         signal.setitimer(signal.ITIMER_REAL, max(float(timeout), 0.001))
     module = load_module(payload)
+    globals()["__perenDurableClass"] = payload.get("durableClass")
     env = hydrate_env(payload.get("env", {}))
     ctx = Context()
     instance = entrypoint(module, env, ctx)
@@ -809,6 +816,7 @@ pub struct PythonRuntime {
     hosts: PythonHosts,
     logs: Vec<WorkerLogEvent>,
     committed_revision: peren_primitives::StorageRevision,
+    durable_class: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -1017,6 +1025,7 @@ impl PythonRuntime {
             hosts,
             logs: Vec::new(),
             committed_revision: peren_primitives::StorageRevision::default(),
+            durable_class: None,
         })
     }
 
@@ -1148,7 +1157,8 @@ impl PythonRuntime {
         clippy::unnecessary_wraps,
         reason = "runtime adapters share a fallible durable-class binding contract"
     )]
-    pub fn bind_durable_class(&mut self, _class_name: &str) -> Result<(), EngineError> {
+    pub fn bind_durable_class(&mut self, class_name: &str) -> Result<(), EngineError> {
+        self.durable_class = Some(class_name.to_string());
         self.logs.clear();
         Ok(())
     }
@@ -1196,6 +1206,7 @@ impl PythonRuntime {
             "event": event,
             "timeoutSeconds": timeout_seconds,
             "memoryLimitBytes": self.execution_memory_limit,
+            "durableClass": self.durable_class,
         }))
         .map_err(|error| EngineError::Request(error.to_string()))?;
         child
@@ -2139,6 +2150,44 @@ class Default(WorkerEntrypoint):
 
         assert_eq!(response.status, 202);
         assert_eq!(response.body, b"hello Python");
+    }
+
+    #[tokio::test]
+    async fn python_fetch_uses_bound_durable_class() {
+        let mut runtime = PythonRuntime::load(
+            bundle(
+                r#"
+from workers import WorkerEntrypoint, Response
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        return Response("default")
+
+class Counter(WorkerEntrypoint):
+    async def fetch(self, request):
+        return Response("counter")
+"#,
+            ),
+            limits(),
+            WorkerEnvironment::empty(),
+        )
+        .unwrap();
+        runtime.bind_durable_class("Counter").unwrap();
+
+        let response = runtime
+            .dispatch_http(
+                HttpRequest {
+                    method: "GET".into(),
+                    url: "http://worker.invalid/".into(),
+                    headers: Vec::new(),
+                    body: Vec::new(),
+                    mtls: None,
+                },
+                invocation_limits(),
+            )
+            .unwrap();
+
+        assert_eq!(response.body, b"counter");
     }
 
     #[tokio::test]

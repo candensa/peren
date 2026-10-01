@@ -1074,7 +1074,13 @@ def _response(value):
     if not isinstance(value, Response): raise TypeError("Python fetch must return a Response")
     return {"status": value.status, "headers": value.headers.items(), "body": list(value.body), "upgrade": False, "websocketId": None}
 async def maybe_await(value): return await value if hasattr(value, "__await__") else value
-def _entrypoint(env, ctx): return module.Default(env, ctx) if hasattr(module, "Default") else None
+def _entrypoint(env, ctx):
+    class_name = globals().get("__perenPyodideDurableClass")
+    if class_name:
+        entry = getattr(module, class_name, None)
+        if entry is None: raise TypeError(f"Python entrypoint must define {class_name}")
+        return entry(env, ctx)
+    return module.Default(env, ctx) if hasattr(module, "Default") else None
 def _handler(instance, name):
     if instance is not None and hasattr(instance, name): return getattr(instance, name), True
     selected = getattr(module, name, None)
