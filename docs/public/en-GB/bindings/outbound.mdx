@@ -58,7 +58,7 @@ export default {
 };
 ```
 
-The Worker calls `env.PUBLIC_API.fetch`. Global `fetch` uses the union of outbound allowlists on that service. Redirect targets are not checked again.
+The Worker calls `env.PUBLIC_API.fetch`. Global `fetch` uses the union of outbound allowlists on that service. Local, private and metadata-style destinations are refused even when allowlisted. Redirect responses are returned to the Worker; Peren does not follow them in the host client.
 
 ## Success
 

@@ -61,6 +61,12 @@ fn validate_services(
                 error.to_string(),
             )),
         }
+        if service.expose_node_id && service.vars.contains_key("PEREN_NODE_ID") {
+            problems.push(Problem::new(
+                format!("services[{index}].vars.PEREN_NODE_ID"),
+                "is reserved when expose_node_id is enabled",
+            ));
+        }
     }
     if config.services.is_empty() {
         problems.push(Problem::new("services", "at least one service is required"));

@@ -143,6 +143,8 @@ pub struct Service {
     #[serde(default)]
     pub vars: BTreeMap<String, String>,
     #[serde(default)]
+    pub expose_node_id: bool,
+    #[serde(default)]
     pub secrets: BTreeMap<String, Secret>,
     #[serde(default)]
     pub secrets_store_refs: BTreeMap<String, String>,

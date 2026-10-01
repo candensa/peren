@@ -103,7 +103,10 @@ pub use secret::{
     RotateReport as SecretRotateReport, SecretError, delete as delete_secret, get as get_secret,
     list as list_secrets, rotate as rotate_secret,
 };
-pub use storage::{Error as StorageError, Prune as StoragePrune, prune_replicas as prune_storage};
+pub use storage::{
+    DeleteCell as StorageDeleteCell, Error as StorageError, Prune as StoragePrune,
+    delete_cell_replicas as delete_cell_storage, prune_replicas as prune_storage,
+};
 pub use supervisor::{Phase, Shutdown, Supervisor, SupervisorError, TaskError};
 pub use tail::{
     ConsoleEvent as TailConsoleEvent, ConsoleLevel as TailConsoleLevel, Event as TailLogEvent,

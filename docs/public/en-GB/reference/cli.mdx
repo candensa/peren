@@ -806,6 +806,32 @@ peren storage prune fleet.toml
 
 **Failure.** Exits `1` on config, provider, listing, read or delete failure.
 
+### `peren storage delete-cell`
+
+Deletes the durable replica state for one cell.
+
+```sh
+peren storage delete-cell <config> --cell <cell-id> [--dry-run] [--force]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--cell <cell-id>` | required | — | 64-character hexadecimal cell id |
+| `--dry-run` | optional | off | Report matching replica objects without deleting |
+| `--force` | optional | off | Required unless `--dry-run` is set |
+
+**State.** Targets `cells/<cell>/root.json` plus snapshot, WAL header, and WAL segment objects for that cell in the configured bucket. Memory buckets report zero deleted objects.
+
+**Output.** `would delete <n> replica object(s) for cell <cell> ...` or `deleted <n> replica object(s) ...`
+
+```sh
+peren storage delete-cell fleet.toml --cell <cell-id> --dry-run
+peren storage delete-cell fleet.toml --cell <cell-id> --force
+```
+
+**Failure.** Exits `1` on config, provider, listing, read or delete failure. Exits `1` when `--force` is omitted on a mutating delete.
+
 ### `peren d1 query`
 
 Executes SQL against a configured D1 binding.

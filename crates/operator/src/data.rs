@@ -152,8 +152,55 @@ pub(super) async fn storage(command: cli::Storage) -> Result<(), CliError> {
                 report.objects_retained
             );
         }
+        cli::Storage::DeleteCell {
+            config,
+            cell,
+            dry_run,
+            force,
+        } => {
+            if !dry_run && !force {
+                return Err(CliError::Unsupported(
+                    "storage delete-cell requires --force unless --dry-run is set",
+                ));
+            }
+            let cell = parse_cell_id(&cell)?;
+            let config = peren_config::FleetConfig::from_path(config)?.validate()?;
+            let report = peren_node::delete_cell_storage(
+                config,
+                &ProcessEnvironment,
+                peren_node::StorageDeleteCell { cell, dry_run },
+            )
+            .await?;
+            let action = if report.dry_run {
+                "would delete"
+            } else {
+                "deleted"
+            };
+            println!(
+                "{action} {} replica object{} for cell {} ({} byte{})",
+                report.objects_removed,
+                suffix(report.objects_removed),
+                report.cell,
+                report.bytes_removed,
+                suffix_u64(report.bytes_removed)
+            );
+        }
     }
     Ok(())
+}
+
+fn parse_cell_id(value: &str) -> Result<peren_primitives::CellId, CliError> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(CliError::Unsupported(
+            "cell id must be 64 hexadecimal characters",
+        ));
+    }
+    let mut bytes = [0_u8; 32];
+    for index in 0..32 {
+        bytes[index] = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
+            .map_err(|_| CliError::Unsupported("cell id must be 64 hexadecimal characters"))?;
+    }
+    Ok(peren_primitives::CellId::from_bytes(bytes))
 }
 
 pub(super) fn kv(command: cli::Kv) -> Result<(), CliError> {

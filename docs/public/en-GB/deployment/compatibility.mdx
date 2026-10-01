@@ -27,7 +27,7 @@ These work with stated limits:
 | KV `compareAndSet` | Works on the native KV backend. Redis and bucket backends throw. |
 | Web Crypto | HMAC, AES-GCM/CBC, PBKDF2/HKDF, Ed25519, and ECDSA P-256 are available. RSA and broader algorithm sets refuse. |
 | Node compatibility | A deliberate subset. `nodejs_compat` and `nodejs_compat_v2` produce a migration notice that you must verify each `node:` import. Modules such as `node:fs`, `node:net`, `node:dns`, and `node:tls` refuse in the isolate. |
-| Outbound `fetch` | Allowed hosts come from configured bindings. Redirect targets are not checked again. |
+| Outbound `fetch` | Allowed hosts come from configured bindings. Local, private and metadata-style destinations are refused even when allowlisted. Redirect responses are returned to the Worker; Peren does not follow them in the host client. |
 | Rate limiter | Counters are process-local. |
 | WebSocketPair and hibernation | Supported for the local Peren host model. Full Cloudflare edge hibernation parity outside that model is unsupported. |
 

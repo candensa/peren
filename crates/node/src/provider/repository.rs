@@ -85,6 +85,22 @@ impl Repository {
             Self::Bucket(store) => store.prune_replicas(dry_run).await,
         }
     }
+
+    pub async fn delete_cell_replicas(
+        &self,
+        cell: CellId,
+        dry_run: bool,
+    ) -> Result<peren_provider_object_store::ReplicaDeleteReport, ReplicaError> {
+        match self {
+            Self::Memory(_) => Ok(peren_provider_object_store::ReplicaDeleteReport {
+                dry_run,
+                cell,
+                objects_removed: 0,
+                bytes_removed: 0,
+            }),
+            Self::Bucket(store) => store.delete_cell_replicas(cell, dry_run).await,
+        }
+    }
 }
 
 impl OwnershipLease for Lease {

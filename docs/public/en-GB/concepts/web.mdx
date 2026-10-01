@@ -29,7 +29,7 @@ Peren gives each Worker a fixed set of web globals and selected Node-compatible 
 
 Global `fetch` and `Peren.fetch` use the same outbound allowlist. A Worker has no open network access. If the host is not allowed, the fetch fails.
 
-Configured `type = "outbound"` bindings expose `env.NAME.fetch` with an `allowed_hosts` list. A host outside that list throws `TypeError`. Redirect targets are not checked again after the first hop.
+Configured `type = "outbound"` bindings expose `env.NAME.fetch` with an `allowed_hosts` list. A host outside that list throws `TypeError`. Local, private and metadata-style destinations are refused even when allowlisted. Redirect responses are returned to the Worker.
 
 Pass a client certificate with `fetch(url, { cf: { mtlsCertificate: env.NAME } })` when `type = "mtls_certificate"` is configured. The binding has no `fetch` method. Missing PEM environment variables fail the process before listeners open. The Worker cannot read the PEM.
 

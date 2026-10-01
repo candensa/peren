@@ -518,6 +518,7 @@ fn process_context(
         telemetry,
         admission,
         environments: environments(
+            NodeId::from_uuid(config.raw.node.id),
             &config.raw.services,
             &config.raw.dispatch_namespaces,
             &config.raw.cache,

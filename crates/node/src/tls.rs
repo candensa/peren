@@ -37,7 +37,7 @@ impl TrustPolicy {
         &self,
         identity: Option<Identity>,
     ) -> Result<reqwest::Client, TlsError> {
-        let mut builder = reqwest::Client::builder();
+        let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
         if let Some(path) = &self.cert_file {
             for certificate in certificates(path)? {
                 builder = builder.add_root_certificate(certificate);
@@ -160,6 +160,45 @@ WEZn1/19Yy4n+d3sR5/WivrpQ1MZ
 
         assert!(!policy.uses_cert_file());
         policy.client().unwrap();
+    }
+
+    #[tokio::test]
+    async fn outbound_client_does_not_follow_redirects() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            let read = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..read]);
+            assert!(request.starts_with("GET /redirect HTTP/1.1"), "{request}");
+            stream
+                .write_all(
+                    b"HTTP/1.1 302 Found\r\nlocation: http://127.0.0.1:9/control/v1/node/drain\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+        let client = TrustPolicy::from_cert_file(None).client().unwrap();
+
+        let response = client
+            .get(format!("http://{address}/redirect"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), reqwest::StatusCode::FOUND);
+        assert_eq!(
+            response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "http://127.0.0.1:9/control/v1/node/drain"
+        );
+        server.join().unwrap();
     }
 
     #[test]

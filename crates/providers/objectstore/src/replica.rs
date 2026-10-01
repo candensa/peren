@@ -22,6 +22,14 @@ pub struct ReplicaPruneReport {
     pub bytes_removed: u64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReplicaDeleteReport {
+    pub dry_run: bool,
+    pub cell: CellId,
+    pub objects_removed: usize,
+    pub bytes_removed: u64,
+}
+
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub(crate) struct ReplicaRoot {
     pub(crate) cell: CellId,
@@ -268,6 +276,32 @@ impl BucketStore {
         Ok(report)
     }
 
+    pub async fn delete_cell_replicas(
+        &self,
+        cell: CellId,
+        dry_run: bool,
+    ) -> Result<ReplicaDeleteReport, ReplicaError> {
+        let mut candidates = self.replica_objects(cell).await?;
+        let root = root_key(cell);
+        if let Some(size) = self.object_size(&root).await? {
+            candidates.insert(root, size);
+        }
+        let mut report = ReplicaDeleteReport {
+            dry_run,
+            cell,
+            objects_removed: 0,
+            bytes_removed: 0,
+        };
+        for (key, size) in candidates {
+            report.objects_removed += 1;
+            report.bytes_removed = report.bytes_removed.saturating_add(size);
+            if !dry_run {
+                self.delete_replica(&key).await?;
+            }
+        }
+        Ok(report)
+    }
+
     async fn prune_cell_replicas(
         &self,
         cell: CellId,
@@ -338,6 +372,14 @@ impl BucketStore {
             }
         }
         Ok(objects)
+    }
+
+    async fn object_size(&self, key: &Path) -> Result<Option<u64>, ReplicaError> {
+        match self.store.head(key).await {
+            Ok(meta) => Ok(Some(u64::try_from(meta.size).unwrap_or(u64::MAX))),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(_) => Err(ReplicaError::Unavailable),
+        }
     }
 }
 

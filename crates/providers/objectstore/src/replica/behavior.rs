@@ -399,6 +399,46 @@ async fn replica_prune_removes_only_objects_unreachable_from_root() {
 }
 
 #[tokio::test]
+async fn delete_cell_replicas_removes_root_and_restore_inputs() {
+    let objects = Arc::new(InMemory::new());
+    let store = BucketStore::new(objects.clone());
+    let cell = CellId::from_bytes([15; 32]);
+    let lease = store.acquire(node(), cell).await.unwrap();
+    let epoch = lease.epoch();
+    store
+        .checkpoint(cell, epoch, StorageRevision::new(1), b"root-db")
+        .await
+        .unwrap();
+    ReplicaRepository::publish_through(
+        &store,
+        cell,
+        epoch,
+        StorageRevision::new(2),
+        &ReplicaPayload {
+            generation: StorageRevision::new(1),
+            database: b"root-db".to_vec(),
+            wal_header: Some([7; 32]),
+            wal_frames: b"wal".to_vec(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let dry = store.delete_cell_replicas(cell, true).await.unwrap();
+    assert!(dry.dry_run);
+    assert_eq!(dry.cell, cell);
+    assert_eq!(dry.objects_removed, 5);
+    assert!(store.restore(cell).await.unwrap().is_some());
+
+    let applied = store.delete_cell_replicas(cell, false).await.unwrap();
+    assert!(!applied.dry_run);
+    assert_eq!(applied.cell, cell);
+    assert_eq!(applied.objects_removed, 5);
+    assert!(store.restore(cell).await.unwrap().is_none());
+    assert!(objects.get(&root_key(cell)).await.is_err());
+}
+
+#[tokio::test]
 async fn restore_uses_authoritative_root_instead_of_newest_listed_object() {
     let objects = Arc::new(InMemory::new());
     let store = BucketStore::new(objects.clone());

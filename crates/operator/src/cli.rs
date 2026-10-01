@@ -374,6 +374,15 @@ pub enum Storage {
         #[arg(long)]
         dry_run: bool,
     },
+    DeleteCell {
+        config: PathBuf,
+        #[arg(long)]
+        cell: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Args)]

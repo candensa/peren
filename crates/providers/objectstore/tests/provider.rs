@@ -109,7 +109,7 @@ fn provider_matrix_names_supported_and_unsupported_backends() {
 }
 
 #[test]
-fn provider_matrix_records_celld_failure_classes() {
+fn provider_matrix_records_required_storage_contracts() {
     assert!(Provider::DigitalOceanSpaces.requires_conditional_put());
     assert!(Provider::SeaweedFs.requires_conditional_put());
     assert!(Provider::Gcs.requires_conditional_put());

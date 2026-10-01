@@ -9,10 +9,6 @@ use env::DataEnv;
 use peren_config::Binding;
 use peren_node::Process;
 use peren_testkit::{http::get, worker::TestWorker};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-};
 
 #[tokio::test]
 async fn public_listener_passes_images_binding_to_worker() {
@@ -271,34 +267,15 @@ async fn public_listener_passes_workflow_binding_to_worker() {
 }
 
 #[tokio::test]
-async fn public_listener_routes_http_images_provider_output() {
-    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let upstream_address = upstream.local_addr().unwrap();
-    let upstream_task = tokio::spawn(async move {
-        let (mut stream, _) = upstream.accept().await.unwrap();
-        let mut request = vec![0; 2048];
-        let read = stream.read(&mut request).await.unwrap();
-        let request = String::from_utf8_lossy(&request[..read]);
-        assert!(request.starts_with("POST /transform HTTP/1.1"), "{request}");
-        assert!(
-            request.contains("authorization: Bearer secret-images"),
-            "{request}"
-        );
-        assert!(
-            request.contains(r#"{"source":"avatar","transforms":{"width":64}}"#),
-            "{request}"
-        );
-        stream
-            .write_all(
-                b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 7\r\nconnection: close\r\n\r\nresized",
-            )
-            .await
-            .unwrap();
-    });
+async fn public_listener_blocks_local_http_images_provider_output() {
     let worker = TestWorker::from_source(
         "export default { async fetch(_request, env) {
-                const output = await env.IMAGES.input('avatar').transform({ width: 64 }).output();
-                return new Response(`${output.status}:${output.headers.get('content-type')}:${await output.text()}:${env.IMAGES.provider.authorization}`);
+                try {
+                    await env.IMAGES.input('avatar').transform({ width: 64 }).output();
+                    return new Response('unexpected');
+                } catch (error) {
+                    return new Response(`${error instanceof Error}:${env.IMAGES.provider.authorization}`);
+                }
             } };",
     );
     let environment = DataEnv::new().with("IMAGES_TOKEN", "secret-images");
@@ -307,7 +284,7 @@ async fn public_listener_routes_http_images_provider_output() {
         "IMAGES".into(),
         Binding::Images {
             provider: peren_config::ImageProvider::Http {
-                url: format!("http://{upstream_address}"),
+                url: "http://127.0.0.1:9".into(),
                 token_env: Some("IMAGES_TOKEN".into()),
             },
         },
@@ -317,12 +294,8 @@ async fn public_listener_routes_http_images_provider_output() {
 
     let response = get(address, "/images").await;
 
-    assert!(
-        response.ends_with("200:text/plain:resized:undefined"),
-        "{response}"
-    );
+    assert!(response.ends_with("true:undefined"), "{response}");
     assert!(!response.contains("secret-images"), "{response}");
-    upstream_task.await.unwrap();
     process.shutdown().await.unwrap();
 }
 
@@ -385,34 +358,23 @@ async fn images_provider_credentials_are_required_at_startup() {
 }
 
 #[tokio::test]
-async fn public_listener_routes_allowed_outbound_binding_fetch() {
-    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let upstream_address = upstream.local_addr().unwrap();
-    let upstream_task = tokio::spawn(async move {
-        let (mut stream, _) = upstream.accept().await.unwrap();
-        let mut request = vec![0; 1024];
-        let read = stream.read(&mut request).await.unwrap();
-        let request = String::from_utf8_lossy(&request[..read]);
-        assert!(request.starts_with("POST /items HTTP/1.1"), "{request}");
-        stream
-            .write_all(
-                b"HTTP/1.1 202 Accepted\r\nx-upstream: peren\r\ncontent-length: 8\r\nconnection: close\r\n\r\naccepted",
-            )
-            .await
-            .unwrap();
-    });
-    let worker = TestWorker::from_source(&format!(
-        "export default {{ async fetch(_request, env) {{
-                const response = await env.OUT.fetch('http://{upstream_address}/items', {{ method: 'POST', body: 'payload' }});
-                return new Response(`${{response.status}}:${{response.headers.get('x-upstream')}}:${{await response.text()}}:${{env.OUT.allowedHosts.join(',')}}`);
-            }} }};"
-    ));
+async fn public_listener_blocks_loopback_outbound_binding_fetch_even_when_allowed() {
+    let worker = TestWorker::from_source(
+        "export default { async fetch(_request, env) {
+                try {
+                    await env.OUT.fetch('http://127.0.0.1:9/items', { method: 'POST', body: 'payload' });
+                    return new Response('unreachable');
+                } catch (error) {
+                    return new Response(`${error.name}:${error.message.includes('runtime host operation failed')}:${env.OUT.allowedHosts.join(',')}`);
+                }
+            } };",
+    );
     let environment = DataEnv::new();
     let mut config = config::worker(worker.path());
     config.raw.services[0].bindings.insert(
         "OUT".into(),
         Binding::Outbound {
-            allowed_hosts: vec![upstream_address.to_string()],
+            allowed_hosts: vec!["127.0.0.1:9".into()],
         },
     );
     let process = Process::start(config, &environment).await.unwrap();
@@ -420,68 +382,10 @@ async fn public_listener_routes_allowed_outbound_binding_fetch() {
 
     let response = get(address, "/outbound").await;
 
-    assert!(
-        response.ends_with(&format!("202:peren:accepted:{upstream_address}")),
-        "{response}"
-    );
-    upstream_task.await.unwrap();
+    assert!(response.ends_with("Error:true:127.0.0.1:9"), "{response}");
     process.shutdown().await.unwrap();
 }
 
-#[tokio::test]
-async fn public_listener_decompresses_gzip_outbound_fetch() {
-    const GZIP: &[u8] = &[
-        31, 139, 8, 0, 0, 0, 0, 0, 0, 19, 75, 206, 207, 45, 40, 74, 45, 46, 78, 77, 81, 200, 72,
-        205, 201, 201, 7, 0, 182, 1, 153, 70, 16, 0, 0, 0,
-    ];
-
-    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let upstream_address = upstream.local_addr().unwrap();
-    let upstream_task = tokio::spawn(async move {
-        let (mut stream, _) = upstream.accept().await.unwrap();
-        let mut request = vec![0; 1024];
-        let read = stream.read(&mut request).await.unwrap();
-        let request = String::from_utf8_lossy(&request[..read]);
-        assert!(request.starts_with("GET /gzip HTTP/1.1"), "{request}");
-        stream
-            .write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\ncontent-encoding: gzip\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                    GZIP.len()
-                )
-                .as_bytes(),
-            )
-            .await
-            .unwrap();
-        stream.write_all(GZIP).await.unwrap();
-    });
-
-    let worker = TestWorker::from_source(&format!(
-        "export default {{ async fetch(_request, env) {{
-                const response = await env.OUT.fetch('http://{upstream_address}/gzip');
-                return new Response(`${{response.status}}:${{response.headers.get('content-encoding')}}:${{await response.text()}}`);
-            }} }};"
-    ));
-    let environment = DataEnv::new();
-    let mut config = config::worker(worker.path());
-    config.raw.services[0].bindings.insert(
-        "OUT".into(),
-        Binding::Outbound {
-            allowed_hosts: vec![upstream_address.to_string()],
-        },
-    );
-    let process = Process::start(config, &environment).await.unwrap();
-    let address = process.listeners()["public"];
-
-    let response = get(address, "/outbound").await;
-
-    assert!(
-        response.ends_with("200:null:compressed hello"),
-        "{response}"
-    );
-    upstream_task.await.unwrap();
-    process.shutdown().await.unwrap();
-}
 #[tokio::test]
 async fn public_listener_rejects_unlisted_outbound_binding_host() {
     let worker = TestWorker::from_source(
@@ -512,34 +416,17 @@ async fn public_listener_rejects_unlisted_outbound_binding_host() {
 }
 
 #[tokio::test]
-async fn public_listener_signs_aws_binding_fetch_without_exposing_credentials() {
-    let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let upstream_address = upstream.local_addr().unwrap();
-    let upstream_task = tokio::spawn(async move {
-        let (mut stream, _) = upstream.accept().await.unwrap();
-        let mut request = vec![0; 4096];
-        let read = stream.read(&mut request).await.unwrap();
-        let request = String::from_utf8_lossy(&request[..read]);
-        assert!(request.starts_with("POST /model HTTP/1.1"), "{request}");
-        assert!(
-            request.contains("authorization: AWS4-HMAC-SHA256"),
-            "{request}"
-        );
-        assert!(request.contains("Credential=test-access/"), "{request}");
-        assert!(request.contains("SignedHeaders="), "{request}");
-        assert!(request.contains("x-amz-date:"), "{request}");
-        assert!(request.contains("x-amz-content-sha256:"), "{request}");
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 6\r\nconnection: close\r\n\r\nsigned")
-            .await
-            .unwrap();
-    });
-    let worker = TestWorker::from_source(&format!(
-        "export default {{ async fetch(_request, env) {{
-                const response = await env.AWS.fetch('http://{upstream_address}/model', {{ method: 'POST', body: 'payload' }});
-                return new Response(`${{response.status}}:${{await response.text()}}:${{env.AWS.region}}:${{env.AWS.service}}:${{env.AWS.allowedHosts.join(',')}}:${{typeof env.AWS.accessKeyId}}:${{typeof env.AWS.secretAccessKey}}`);
-            }} }};"
-    ));
+async fn public_listener_blocks_loopback_aws_binding_fetch() {
+    let worker = TestWorker::from_source(
+        "export default { async fetch(_request, env) {
+                try {
+                    await env.AWS.fetch('http://127.0.0.1:9/model', { method: 'POST', body: 'payload' });
+                    return new Response('unreachable');
+                } catch (error) {
+                    return new Response(`${error.name}:${error.message.includes('runtime host operation failed')}:${env.AWS.region}:${env.AWS.service}:${env.AWS.allowedHosts.join(',')}:${typeof env.AWS.accessKeyId}:${typeof env.AWS.secretAccessKey}`);
+                }
+            } };",
+    );
     let environment = DataEnv::new()
         .with("AWS_ACCESS_KEY_ID", "test-access")
         .with("AWS_SECRET_ACCESS_KEY", "test-secret");
@@ -550,7 +437,7 @@ async fn public_listener_signs_aws_binding_fetch_without_exposing_credentials() 
             credential_source: peren_config::CredentialsSource::Environment,
             region: "us-east-1".into(),
             service: "bedrock".into(),
-            allowed_hosts: vec![upstream_address.to_string()],
+            allowed_hosts: vec!["127.0.0.1:9".into()],
             access_key_env: Some("AWS_ACCESS_KEY_ID".into()),
             secret_key_env: Some("AWS_SECRET_ACCESS_KEY".into()),
             token_env: None,
@@ -562,11 +449,8 @@ async fn public_listener_signs_aws_binding_fetch_without_exposing_credentials() 
     let response = get(address, "/aws").await;
 
     assert!(
-        response.ends_with(&format!(
-            "200:signed:us-east-1:bedrock:{upstream_address}:undefined:undefined"
-        )),
+        response.ends_with("Error:true:us-east-1:bedrock:127.0.0.1:9:undefined:undefined"),
         "{response}"
     );
-    upstream_task.await.unwrap();
     process.shutdown().await.unwrap();
 }

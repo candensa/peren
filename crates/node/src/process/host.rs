@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Write,
+    net::IpAddr,
     process::{Command as ProcessCommand, Stdio},
     sync::Arc,
     time::Instant,
@@ -376,6 +377,9 @@ impl ProcessHost {
         if !self.outbound_hosts.contains(&host) {
             return Err(HostError);
         }
+        if is_forbidden_worker_egress(&url) || resolves_to_forbidden_worker_egress(&url).await? {
+            return Err(HostError);
+        }
         let method =
             reqwest::Method::from_bytes(request.method.as_bytes()).map_err(|_| HostError)?;
         let client = match request.mtls.as_deref() {
@@ -429,6 +433,53 @@ fn request_host(url: &reqwest::Url) -> Option<String> {
         Some(port) => format!("{host}:{port}"),
         None => host.to_string(),
     })
+}
+
+pub(super) fn is_forbidden_worker_egress(url: &reqwest::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return true;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<IpAddr>().is_ok_and(forbidden_worker_ip)
+}
+
+pub(super) async fn resolves_to_forbidden_worker_egress(
+    url: &reqwest::Url,
+) -> Result<bool, HostError> {
+    let Some(host) = url.host_str() else {
+        return Ok(true);
+    };
+    if host.parse::<IpAddr>().is_ok() || host.eq_ignore_ascii_case("localhost") {
+        return Ok(false);
+    }
+    let port = url.port_or_known_default().ok_or(HostError)?;
+    let addresses = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| HostError)?;
+    Ok(addresses
+        .map(|address| address.ip())
+        .any(forbidden_worker_ip))
+}
+
+fn forbidden_worker_ip(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => {
+            address.is_loopback()
+                || address.is_private()
+                || address.is_link_local()
+                || address.is_broadcast()
+                || address.is_documentation()
+                || address.is_unspecified()
+        }
+        IpAddr::V6(address) => {
+            address.is_loopback()
+                || address.is_unspecified()
+                || matches!(address.segments()[0] & 0xfe00, 0xfc00)
+                || matches!(address.segments()[0] & 0xffc0, 0xfe80)
+        }
+    }
 }
 
 #[async_trait::async_trait]

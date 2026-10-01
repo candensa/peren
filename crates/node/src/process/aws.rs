@@ -5,7 +5,10 @@ use peren_runtime::{AwsSigv4Fetch, HostError, HttpRequest, HttpResponse};
 use reqwest::Url;
 use sha2::{Digest, Sha256};
 
-use super::{AwsBinding, AwsCredential};
+use super::{
+    AwsBinding, AwsCredential,
+    host::{is_forbidden_worker_egress, resolves_to_forbidden_worker_egress},
+};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -26,6 +29,9 @@ pub(super) async fn fetch(
     let url = Url::parse(&request.request.url).map_err(|_| HostError)?;
     let host = request_host(&url).ok_or(HostError)?;
     if !binding.hosts.contains(&host) {
+        return Err(HostError);
+    }
+    if is_forbidden_worker_egress(&url) || resolves_to_forbidden_worker_egress(&url).await? {
         return Err(HostError);
     }
     let credential = credential(&binding.credential)?;

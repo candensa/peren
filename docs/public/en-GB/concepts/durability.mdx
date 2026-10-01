@@ -24,6 +24,8 @@ Checkpointing writes a new complete database image, resets the WAL boundary and 
 
 `peren storage prune` uses the same root reachability rule. It keeps the root snapshot and WAL objects, then removes replica objects that are no longer reachable from the authoritative root.
 
+`peren storage delete-cell` is the explicit operator path for permanent cell erasure. It removes the authoritative restore pointer and replica objects for one cell id after a dry run or an explicit `--force`. Use it only when the application no longer needs that cell and you accept that Peren cannot restore its prior state from the fleet bucket.
+
 ## Lifecycle trace points
 
 Each mutable dispatch passes through the same observable lifecycle:
