@@ -49,6 +49,10 @@ pub enum Command {
         #[command(subcommand)]
         command: D1,
     },
+    Storage {
+        #[command(subcommand)]
+        command: Storage,
+    },
     Diagnose(Diagnose),
     Logs(Tail),
     Tail(Tail),
@@ -361,6 +365,15 @@ pub struct D1Restore {
     pub to: Option<String>,
     #[arg(long)]
     pub bookmark: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Storage {
+    Prune {
+        config: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Debug, Args)]

@@ -113,6 +113,35 @@ async fn checkpoint_prunes_old_replica_generations() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn checkpoint_threshold_collapses_published_wal() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cell.sqlite");
+    let repository = repository(false);
+    let prunes = Arc::clone(&repository.prunes);
+    let mut cell = WorkerCell::activate(
+        &path,
+        lease(usize::MAX),
+        repository,
+        counter_bundle(),
+        isolate(),
+        WorkerEnvironment::empty(),
+    )
+    .await
+    .unwrap();
+
+    cell.dispatch_http(request("/increment"), invocation())
+        .await
+        .unwrap();
+    assert!(cell.last_commit().unwrap().wal_bytes > 0);
+
+    cell.checkpoint_if_wal_exceeds(1).await.unwrap();
+
+    assert_eq!(cell.last_commit().unwrap().wal_bytes, 0);
+    assert_eq!(prunes.load(Ordering::SeqCst), 1);
+    cell.release().await.unwrap();
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn read_only_dispatch_does_not_publish_a_replica() {
     let repository = repository(false);
     let published = Arc::clone(&repository.image);

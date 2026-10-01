@@ -446,6 +446,9 @@ async fn dispatch_queue_with_host(
         )
         .await?;
         let dispatch = resident.dispatch_queue(event).await?;
+        resident
+            .checkpoint_if_wal_exceeds(target.checkpoint_threshold_bytes)
+            .await?;
         let logs = resident.take_console_events();
         resident.release().await?;
         Ok(QueueDispatchResult { dispatch, logs })

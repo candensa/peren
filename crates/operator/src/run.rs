@@ -23,6 +23,7 @@ pub async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Diagnose(command) => health::diagnose(command).await?,
         Command::Credential { command } => credential::run(command)?,
         Command::D1 { command } => crate::data::d1(command)?,
+        Command::Storage { command } => crate::data::storage(command).await?,
         Command::Kv { command } => crate::data::kv(command)?,
         Command::Queue { command } => crate::data::queue(command).await?,
         Command::Kubernetes { command } => kubernetes::run(command)?,
@@ -93,6 +94,8 @@ pub enum CliError {
     Queue(#[from] peren_queues::QueueError),
     #[error(transparent)]
     Kv(#[from] peren_node::KvImportError),
+    #[error(transparent)]
+    Storage(#[from] peren_node::StorageError),
     #[error(transparent)]
     DevVars(#[from] devvars::DevVarsError),
     #[error("kubernetes conformance failed: {0}")]

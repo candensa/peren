@@ -126,6 +126,36 @@ pub(super) async fn queue(command: cli::Queue) -> Result<(), CliError> {
     Ok(())
 }
 
+pub(super) async fn storage(command: cli::Storage) -> Result<(), CliError> {
+    match command {
+        cli::Storage::Prune { config, dry_run } => {
+            let config = peren_config::FleetConfig::from_path(config)?.validate()?;
+            let report = peren_node::prune_storage(
+                config,
+                &ProcessEnvironment,
+                peren_node::StoragePrune { dry_run },
+            )
+            .await?;
+            let action = if report.dry_run {
+                "would prune"
+            } else {
+                "pruned"
+            };
+            println!(
+                "{action} {} replica object{} across {} cell{} ({} byte{}) retained_objects={}",
+                report.objects_removed,
+                suffix(report.objects_removed),
+                report.cells_scanned,
+                suffix(report.cells_scanned),
+                report.bytes_removed,
+                suffix_u64(report.bytes_removed),
+                report.objects_retained
+            );
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn kv(command: cli::Kv) -> Result<(), CliError> {
     match command {
         cli::Kv::BulkImport {
@@ -151,6 +181,10 @@ pub(super) fn kv(command: cli::Kv) -> Result<(), CliError> {
 }
 
 fn suffix(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
+fn suffix_u64(count: u64) -> &'static str {
     if count == 1 { "" } else { "s" }
 }
 

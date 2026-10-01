@@ -766,6 +766,30 @@ peren uninstall fleet.toml --force
 
 ## Data operations
 
+### `peren storage prune`
+
+Prunes obsolete cell replica objects from the configured bucket.
+
+```sh
+peren storage prune <config> [--dry-run]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--dry-run` | optional | off | Report reclaimable objects without deleting |
+
+**State.** Scans cells with an authoritative replica root. The command keeps `root.json` and every snapshot, WAL header and WAL segment named by that root. Objects outside the root's restore plan are removed only when `--dry-run` is absent. Memory buckets report zero pruned objects.
+
+**Output.** `would prune <n> replica object(s) across <cells> cell(s) ...` or `pruned <n> replica object(s) ...`
+
+```sh
+peren storage prune fleet.toml --dry-run
+peren storage prune fleet.toml
+```
+
+**Failure.** Exits `1` on config, provider, listing, read or delete failure.
+
 ### `peren d1 query`
 
 Executes SQL against a configured D1 binding.
