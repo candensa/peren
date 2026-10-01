@@ -1,0 +1,46 @@
+---
+title: "Networking and ports"
+description: "Separate public sockets from the peer listener and keep peer traffic off the public network."
+---
+
+Expose application traffic on public sockets and keep peer coordination on a separate listen address. Peren serves both listeners as plain TCP. Keep the peer port off the public network.
+
+## Public sockets
+
+Each `[[sockets]]` entry binds a listen address and routes to a named service. Clients reach Workers through that address. Health, readiness, and metrics are available on the same listener:
+
+- `/healthz` returns 200 when the process is alive.
+- `/readyz` returns 200 when the listener is ready, otherwise 503.
+- `/metrics` exports Prometheus text metrics.
+
+Terminate public TLS at a reverse proxy or load balancer in front of the socket. The Peren process does not terminate inbound TLS.
+
+## Peer listener
+
+`[node].listen` is the peer listen address. Control endpoints such as `POST /control/v1/node/drain` are served only on the peer listener. Keep that port off the public network with host firewall rules, security groups, or cluster network policy.
+
+## Certificate material in config
+
+```toml
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+```
+
+These paths are required in the fleet config. The running process does not use them to terminate inbound TLS on public or peer listeners. Keep the peer port off the public network.
+
+Worker client certificates are a different capability. Configure them as an `mtls_certificate` binding and pass them on `fetch` to an allowed host. See [mTLS bindings](/docs/bindings/mtls/).
+
+## Operator checks
+
+```sh
+peren node health peren.toml
+curl -sS http://127.0.0.1:8080/healthz
+curl -sS http://127.0.0.1:8080/readyz
+curl -sS http://127.0.0.1:8080/metrics
+```
+
+`peren node health` probes the peer listen address and every configured public socket with `/readyz`.
+
+Related: [Deployment overview](/docs/deploy/overview/), [Drain a node](/docs/operate/drain/), [Observability](/docs/operations/observability/).

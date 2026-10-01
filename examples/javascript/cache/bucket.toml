@@ -1,0 +1,30 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000128"
+advertise_addr = "127.0.0.1:7128"
+listen = "127.0.0.1:7128"
+
+[bucket]
+kind = "memory"
+
+[cache]
+kind = "bucket"
+endpoint = "https://s3.example.com"
+bucket = "peren-cache"
+prefix = "cache/"
+access_key_id_env = "CACHE_ACCESS_KEY_ID"
+secret_access_key_env = "CACHE_SECRET_ACCESS_KEY"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "cache"
+worker_bundle_path = "examples/javascript/cache/worker.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8128"
+service = "cache"

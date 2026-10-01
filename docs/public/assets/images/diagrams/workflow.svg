@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 328" role="img" aria-labelledby="title">
+<title id="title">create returns an instance you can terminate.</title>
+<defs>
+  <marker id="workflow-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="workflow-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1100" height="328" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="80" width="304" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="104" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">BINDING</text>
+<rect x="380" y="24" width="344" height="280" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="396" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">INSTANCE</text>
+<rect x="796" y="80" width="280" height="164" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="812" y="104" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">STORAGE</text>
+<path d="M 296.0 164.0 L 354.0 164.0 L 354.0 108.0 L 412.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#workflow-end)"/>
+<path d="M 552.0 136.0 L 552.0 216.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#workflow-end)"/>
+<path d="M 296.0 164.0 L 562.0 164.0 L 562.0 174.0 L 828.0 174.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#workflow-end)"/>
+<rect x="360.3" y="171.0" width="57.6" height="22" rx="6" fill="#fbfaf7"/>
+<text x="389.1" y="186.0" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">stores</text>
+<rect x="56" y="136" width="240" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="176" y="169.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">binding create</text>
+<circle cx="56" cy="136" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="56" y="140" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">1</text>
+<rect x="412" y="80" width="280" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="552" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">instance status</text>
+<circle cx="412" cy="80" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="412" y="84" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">2</text>
+<rect x="452" y="216" width="200" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="552" y="249.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">terminate</text>
+<circle cx="452" cy="216" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="452" y="220" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">3</text>
+<rect x="828" y="136" width="216" height="76" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="936" y="171.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">native storage</text>
+<text x="936" y="187.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">under the node</text>
+</svg>

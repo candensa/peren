@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1084 388" role="img" aria-labelledby="title">
+<title id="title">The binding is the only way out of the isolate.</title>
+<defs>
+  <marker id="overview-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="overview-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1084" height="388" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="100" width="216" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="124" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">YOUR PROJECT</text>
+<rect x="268" y="24" width="453" height="340" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="284" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">THE NODE</text>
+<rect x="796" y="24" width="264" height="248" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="812" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">OUTSIDE THE ISOLATE</text>
+<path d="M 208.0 184.0 L 254.0 184.0 L 254.0 108.0 L 300.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#overview-end)"/>
+<rect x="247.0" y="146.4" width="50.0" height="22" rx="6" fill="#fbfaf7"/>
+<text x="272.0" y="161.4" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">loads</text>
+<path d="M 374.0 136.0 L 374.0 146.0 L 600.0 146.0 L 600.0 156.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#overview-end)"/>
+<path d="M 448.0 288.0 L 448.0 148.0 L 828.0 148.0 L 828.0 212.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#overview-end)"/>
+<rect x="429.6" y="228.0" width="72.8" height="22" rx="6" fill="#fbfaf7"/>
+<text x="466.0" y="243.0" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">declared</text>
+<path d="M 928.0 136.0 L 928.0 184.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#overview-end)"/>
+<path d="M 600.0 212.0 L 600.0 244.0 L 604.5 244.0 L 604.5 276.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#overview-end)"/>
+<rect x="549.4" y="217.0" width="65.2" height="22" rx="6" fill="#fbfaf7"/>
+<text x="582.0" y="232.0" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">refused</text>
+<rect x="56" y="156" width="152" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="132" y="189.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">fleet.toml</text>
+<circle cx="56" cy="156" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="56" y="160" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">1</text>
+<rect x="300" y="80" width="148" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="374" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">socket</text>
+<circle cx="300" cy="80" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="300" y="84" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">2</text>
+<rect x="520" y="156" width="160" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="600" y="189.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">isolate</text>
+<rect x="300" y="260" width="148" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="374" y="293.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">env binding</text>
+<circle cx="300" cy="260" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="300" y="264" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">3</text>
+<rect x="828" y="184" width="200" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="928" y="217.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">host call</text>
+<circle cx="828" cy="184" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="828" y="188" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">4</text>
+<rect x="828" y="80" width="200" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="928" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">provider credential</text>
+<rect x="520" y="276" width="169" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="604.5" y="309.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">undeclared fetch</text>
+</svg>

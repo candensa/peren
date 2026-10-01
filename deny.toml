@@ -1,0 +1,29 @@
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+  { id = "RUSTSEC-2024-0436", reason = "Transitive through Deno/V8, nalgebra, and spinoff; track upstream replacement for paste." },
+  { id = "RUSTSEC-2025-0134", reason = "Transitive through Deno TLS/native certificate handling; track upstream migration away from rustls-pemfile." },
+  { id = "RUSTSEC-2025-0141", reason = "Transitive through deno_core; bincode 1.3.3 is complete but unmaintained." },
+  { id = "RUSTSEC-2026-0049", reason = "Transitive through Deno TLS stack; update when Deno releases compatible rustls-webpki constraints." },
+  { id = "RUSTSEC-2026-0098", reason = "Transitive through Deno TLS stack; update when Deno releases compatible rustls-webpki constraints." },
+  { id = "RUSTSEC-2026-0099", reason = "Transitive through Deno TLS stack; update when Deno releases compatible rustls-webpki constraints." },
+  { id = "RUSTSEC-2026-0104", reason = "Transitive through Deno TLS stack; update when Deno releases compatible rustls-webpki constraints." },
+  { id = "RUSTSEC-2026-0118", reason = "Transitive through Deno DNS dependencies; update when Deno releases compatible hickory constraints." },
+  { id = "RUSTSEC-2026-0119", reason = "Transitive through Deno DNS dependencies; update when Deno releases compatible hickory constraints." },
+  { id = "RUSTSEC-2026-0194", reason = "Transitive through object_store; update when object_store releases compatible quick-xml constraints." },
+  { id = "RUSTSEC-2026-0195", reason = "Transitive through object_store; update when object_store releases compatible quick-xml constraints." },
+  { id = "RUSTSEC-2026-0285", reason = "Transitive through Deno and queue TLS dependencies; update when upstream crates release compatible rustls constraints." },
+]
+
+[licenses]
+version = 2
+allow = ["Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MIT", "Unicode-3.0", "Zlib"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-git = "deny"
+unknown-registry = "deny"

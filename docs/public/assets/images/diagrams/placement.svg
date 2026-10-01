@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 972 328" role="img" aria-labelledby="title">
+<title id="title">Ownership is the permission to commit.</title>
+<defs>
+  <marker id="placement-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="placement-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="972" height="328" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="24" width="924" height="280" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">OWNERSHIP</text>
+<path d="M 236.0 164.0 L 336.0 164.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#placement-end)"/>
+<path d="M 536.0 164.0 L 606.0 164.0 L 606.0 108.0 L 676.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#placement-end)"/>
+<path d="M 536.0 164.0 L 606.0 164.0 L 606.0 244.0 L 676.0 244.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#placement-end)"/>
+<rect x="547.8" y="181.0" width="80.4" height="22" rx="6" fill="#fbfaf7"/>
+<text x="588.0" y="196.0" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">lost race</text>
+<rect x="56" y="136" width="180" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="146" y="169.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">unowned cell</text>
+<rect x="336" y="136" width="200" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="436" y="169.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">conditional write</text>
+<rect x="676" y="80" width="200" height="56" rx="12" fill="#e7f2ee" stroke="#2f5d50" stroke-width="1.6"/>
+<text x="776" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">owner</text>
+<rect x="676" y="216" width="240" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="796" y="249.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">stale writer refused</text>
+</svg>

@@ -1,0 +1,109 @@
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/candensa/peren
+  tag: 0.1.0
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: true
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: /metrics
+  prometheus.io/port: "8080"
+
+podLabels: {}
+
+config:
+  existingSecret: ""
+  fileName: config.toml
+  inline: |
+    [node]
+    node_id = "00000000-0000-0000-0000-000000000001"
+    advertise_addr = "0.0.0.0:7000"
+    listen = "0.0.0.0:7000"
+
+    [bucket]
+    kind = "s3"
+    endpoint = "https://s3.example.com"
+    bucket = "peren-production"
+    region = "auto"
+    access_key_id_env = "PEREN_S3_ACCESS_KEY_ID"
+    secret_access_key_env = "PEREN_S3_SECRET_ACCESS_KEY"
+
+    [mtls]
+    ca_cert_path = "/etc/peren/tls/ca.pem"
+    leaf_cert_path = "/etc/peren/tls/tls.crt"
+    leaf_key_path = "/etc/peren/tls/tls.key"
+
+secrets:
+  existingSecret: ""
+  create: false
+  values: {}
+
+extraEnv: []
+extraEnvFrom: []
+
+service:
+  type: ClusterIP
+  peerPort: 7000
+  publicPort: 8080
+
+headlessService:
+  enabled: true
+
+storage:
+  dataDir: /var/lib/peren
+  size: 10Gi
+  storageClassName: ""
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+security:
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+probes:
+  startup:
+    periodSeconds: 2
+    failureThreshold: 30
+  liveness:
+    periodSeconds: 10
+    failureThreshold: 3
+  readiness:
+    periodSeconds: 5
+    failureThreshold: 3
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+autoscaling:
+  enabled: false
+  minReplicas: 3
+  maxReplicas: 12
+  targetCPUUtilizationPercentage: 65
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

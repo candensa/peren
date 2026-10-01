@@ -1,0 +1,136 @@
+---
+title: "Languages and modules"
+description: "Load JavaScript, CommonJS, and WebAssembly modules; resolve relative imports; use the loader binding."
+---
+
+A Worker bundle is one entry module plus any modules listed under `additional_modules`. Peren selects the module kind from the file extension, resolves relative imports inside the bundle, and refuses bare package names and remote URLs.
+
+## Module kinds
+
+| Extension | Kind |
+| --- | --- |
+| `.cjs` | CommonJS |
+| `.wasm` | WebAssembly |
+| anything else | JavaScript |
+
+The entry module cannot be WebAssembly. Import `.wasm` modules from a JavaScript or CommonJS entry. Bundle construction refuses a `.wasm` entry path.
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- A fleet file with `[node]`, `[bucket]`, `[mtls]`, one service, and one socket
+- Development certificates from `peren devcert ./certs`, with `[mtls]` edited to `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`
+- Every non-entry module listed in `[services.additional_modules]`
+
+## JavaScript entry with CommonJS and Wasm
+
+Create `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.additional_modules]
+"value.cjs" = "value.cjs"
+"helper.js" = "helper.js"
+"answer.wasm" = "answer.wasm"
+
+[services.bindings.LOADER]
+type = "loader"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+An empty key under `additional_modules` derives the module name from the path relative to the bundle root. A non-empty key is the module name inside the isolate. Listing the entry file name again as an additional module fails validation.
+
+Create `worker.js`:
+
+```js
+import compiled from "./answer.wasm";
+import value from "./value.cjs";
+
+const instance = new WebAssembly.Instance(compiled);
+
+export default {
+  async fetch(_request, env) {
+    const helper = await env.LOADER.import("./helper.js");
+    return new Response(
+      `${value.prefix}:${instance.exports.answer()}:${helper.label}`,
+    );
+  },
+};
+```
+
+Create `value.cjs`:
+
+```js
+exports.prefix = "mixed";
+```
+
+Create `helper.js`:
+
+```js
+export const label = "dynamic";
+```
+
+Provide a Wasm module at `answer.wasm` that exports `answer`. That binary is not shipped as a complete runnable example in the product examples tree; assemble your own Wasm artifact before you treat this layout as executable.
+
+## Import rules
+
+Specifiers resolve relative to the importing module. Only `./` and `../` relative paths are accepted for bundle modules. Bare package names and remote URLs are refused.
+
+Built-in loaders allow `node:` modules and `cloudflare:workers` where the runtime registers them. Those builtins are not read from the host filesystem as application packages.
+
+## Loader binding
+
+`type = "loader"` places a `Loader` on `env`. The object exposes `import(specifier)`:
+
+- an empty specifier throws `TypeError`
+- specifiers that start with `http:`, `https:`, `node:`, `npm:`, or `jsr:` throw `TypeError`
+- otherwise Peren resolves the specifier as a URL relative to the entry module and loads that module from the bundle
+
+`node:` through the loader binding is refused even though static `import` of supported `node:` builtins can succeed. Use static imports for builtins; use the loader for relative modules already present in the bundle.
+
+## Run and verify
+
+```sh
+peren serve fleet.toml
+```
+
+```sh
+curl http://127.0.0.1:8080/
+```
+
+When `answer.wasm` exports `answer` as `42`, `value.cjs` exports `prefix = "mixed"`, and `helper.js` exports `label = "dynamic"`, the body is:
+
+```text
+mixed:42:dynamic
+```
+
+## Failure
+
+A relative import that names a module absent from the bundle fails isolate load with an error that the module is absent from the Worker bundle. Add the file under `[services.additional_modules]`, then start the node again.
+
+## Related
+
+- [Workers](/docs/build/workers/)
+- [Runtime API reference](/docs/reference/runtime/)
+- [Configuration reference](/docs/reference/configuration/)

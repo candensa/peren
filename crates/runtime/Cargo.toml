@@ -1,0 +1,38 @@
+[package]
+name = "peren-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+aes-gcm.workspace = true
+aes.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+cbc.workspace = true
+deno_core = "0.403.0"
+deno_error = "=0.7.1"
+deno_fetch = "0.274.0"
+deno_net = "0.242.0"
+deno_web = "0.281.0"
+deno_webidl = "0.250.0"
+peren-primitives.workspace = true
+pbkdf2.workspace = true
+hex.workspace = true
+hmac.workspace = true
+rand.workspace = true
+ring.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+peren-storage.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

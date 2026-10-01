@@ -1,0 +1,214 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: Rust format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo fmt --all -- --check
+
+  advisories:
+    name: Rust dependency advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
+
+  rust-tests:
+    name: Rust tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-tests
+      - name: install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - run: cargo test --workspace --all-features
+
+  vitest:
+    name: Vitest plugin checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix packaging/vitest ci
+      - run: npm --prefix packaging/vitest run typecheck
+      - run: npm --prefix packaging/vitest test
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: [format, advisories, rust-tests, vitest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+      - name: install native build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - run: cargo build --release --locked -p peren --target ${{ matrix.target }}
+      - name: stage binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/peren dist/peren-${{ matrix.target }}
+          shasum -a 256 dist/peren-${{ matrix.target }} > dist/checksums-${{ matrix.target }}.txt
+      - run: sh packaging/install.sh --binary dist/peren-${{ matrix.target }} --bindir "$RUNNER_TEMP/peren/bin" --quiet
+      - name: smoke test worker dispatch
+        shell: bash
+        run: packaging/smoke-release-binary.sh "$RUNNER_TEMP/peren/bin/peren"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: peren-${{ matrix.target }}
+          path: |
+            dist/peren-${{ matrix.target }}
+            dist/checksums-${{ matrix.target }}.txt
+
+  image:
+    name: Container image
+    needs: [format, advisories, rust-tests, vitest]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build and push image
+        run: |
+          docker buildx build \
+            --push \
+            --cache-from type=registry,ref=ghcr.io/candensa/peren:buildcache \
+            --cache-to type=registry,ref=ghcr.io/candensa/peren:buildcache,mode=max \
+            --metadata-file image-metadata.json \
+            --tag ghcr.io/candensa/peren:${{ github.ref_name }} \
+            --tag ghcr.io/candensa/peren:latest \
+            .
+      - name: capture image digest
+        id: image
+        run: |
+          digest=$(jq -r '."containerimage.digest"' image-metadata.json)
+          test -n "$digest"
+          test "$digest" != "null"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/candensa/peren
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - uses: sigstore/cosign-installer@v3
+      - run: cosign sign --yes ghcr.io/candensa/peren:${{ github.ref_name }}
+      - name: verify anonymous image access
+        run: |
+          docker logout ghcr.io
+          docker buildx imagetools inspect ghcr.io/candensa/peren:${{ github.ref_name }}
+          docker run --rm ghcr.io/candensa/peren:${{ github.ref_name }} --version
+
+  publish:
+    name: Publish release
+    needs: [build, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist/artifacts
+      - name: assemble release assets
+        shell: bash
+        run: |
+          mkdir -p dist/release
+          find dist/artifacts -type f -name 'peren-*' -not -name '*.txt' -exec cp {} dist/release/ \;
+          find dist/artifacts -type f -name 'checksums-*.txt' -exec cat {} \; > dist/release/checksums.txt
+          node -e 'const fs=require("fs"); const files=fs.readdirSync("dist/release").filter(f=>f.startsWith("peren-")); fs.writeFileSync("dist/release/manifest.json", JSON.stringify({name:"peren", version:process.env.GITHUB_REF_NAME, binaries:files}, null, 2)+"\n")'
+      - uses: sigstore/cosign-installer@v3
+      - run: cosign sign-blob --yes --bundle dist/release/peren-x86_64-unknown-linux-gnu.bundle dist/release/peren-x86_64-unknown-linux-gnu
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/release/peren-x86_64-unknown-linux-gnu
+            dist/release/peren-aarch64-unknown-linux-gnu
+            dist/release/peren-x86_64-apple-darwin
+            dist/release/peren-aarch64-apple-darwin
+            dist/release/checksums.txt
+            dist/release/manifest.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/release/*
+          fail_on_unmatched_files: true
+
+  verify-release:
+    name: Verify published release
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: install from GitHub release
+        shell: bash
+        run: sh packaging/install.sh --version "$GITHUB_REF_NAME" --bindir "$RUNNER_TEMP/peren/bin" --quiet
+      - name: check installed binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/peren/bin/peren" --version
+          packaging/smoke-release-binary.sh "$RUNNER_TEMP/peren/bin/peren"

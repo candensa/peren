@@ -1,0 +1,94 @@
+---
+title: "Scheduled work"
+description: "Configure cron triggers and handle scheduled(event, env, ctx) on the default export."
+---
+
+Scheduled work runs the Worker's `scheduled` handler when Peren dispatches a cron event. Configure expressions on the service with `cron_triggers`. The handler receives `event.cron` and `event.scheduledTime`, plus `env` and `ctx`.
+
+<SystemDiagram name="scheduled" />
+
+This build validates cron expressions at config load and exposes the `scheduled` handler on the isolate. There is no public `peren` command that fires a cron event, and the running node does not tick `cron_triggers` into `scheduled` on a timer. Use the handler and configuration when your deployment path supplies scheduled dispatch; do not expect a local CLI trigger in this release.
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- A fleet file with `[node]`, `[bucket]`, `[mtls]`, one service, and one socket
+- Development certificates from `peren devcert ./certs`, with `[mtls]` edited to `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`
+
+## Configure
+
+Create `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "cron"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[services.cron_triggers]]
+expression = "0 */5 * * * * *"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "cron"
+```
+
+Each trigger is `{ expression }`. The expression must parse as a valid cron schedule. An invalid expression fails config validation.
+
+Create `worker.js`:
+
+```js
+export default {
+  scheduled(event, env, ctx) {
+    ctx.waitUntil(Promise.resolve(event.cron));
+  },
+
+  fetch() {
+    return new Response("cron service\n");
+  },
+};
+```
+
+`event.cron` is the expression string for that dispatch. `event.scheduledTime` is the scheduled instant in milliseconds. `ctx` exposes `waitUntil` only. If `scheduled` is absent, Peren falls back to `addEventListener("scheduled", ...)`.
+
+## Run and verify
+
+```sh
+peren serve fleet.toml
+```
+
+```sh
+curl http://127.0.0.1:8080/
+```
+
+The response body is:
+
+```text
+cron service
+```
+
+That response proves the service loaded. It does not prove a cron tick ran. There is no public CLI in this release that invokes `scheduled`.
+
+## Failure
+
+An invalid expression fails `peren config validate` and refuses process start with a problem on `services[].cron_triggers[].expression` stating that the value must be a valid cron expression. Fix the expression, then start the node again.
+
+## Related
+
+- [Workers](/docs/build/workers/)
+- [Runtime API reference](/docs/reference/runtime/)
+- [Configuration reference](/docs/reference/configuration/)

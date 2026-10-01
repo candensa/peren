@@ -1,0 +1,50 @@
+---
+title: "Back up a data directory"
+description: "Copy PEREN_DATA_DIR to a new path for offline retention and restore."
+---
+
+Copy the local operator data directory to a destination that does not already exist. Use the copy when you need an offline archive before upgrade, restore, or host replacement.
+
+`peren backup` copies `PEREN_DATA_DIR` (or `./data` when that variable is unset). It is not a live consistent snapshot of a running process. Stop or quiesce writers when you need a consistent copy.
+
+<SystemDiagram name="backup" />
+
+## Prerequisites
+
+- a validated fleet config path;
+- an existing data directory under `PEREN_DATA_DIR` or `./data`;
+- a destination path that does not exist yet.
+
+## Procedure
+
+Required flags:
+
+- config path (positional);
+- `--output` — destination directory; must not exist.
+
+<Warning>
+`peren backup` copies files from the data directory as they exist on disk. Concurrent writers can leave the archive mid-update. Quiesce or stop the process when consistency matters.
+</Warning>
+
+```sh
+peren backup peren.toml --output ./backup-2026-03-01
+```
+
+Representative output:
+
+```text
+backed up ./data to ./backup-2026-03-01 files=12
+```
+
+## Verification
+
+Confirm the destination directory exists and that the printed `files=` count is greater than zero when the source held files. A later [restore](/docs/operate/restore/) against this path is the prove-it check for a usable archive.
+
+## Failure
+
+| Result | Cause | Next action |
+| --- | --- | --- |
+| backup source does not exist | data directory absent | create or set `PEREN_DATA_DIR`, then retry |
+| backup destination already exists | `--output` path is present | choose a new path or remove the empty destination outside Peren |
+
+Related: [Restore a data directory](/docs/operate/restore/), [Plan upgrades](/docs/operate/upgrade/), [Operations overview](/docs/operate/overview/).

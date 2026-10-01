@@ -1,0 +1,108 @@
+---
+title: "Static assets"
+description: "Serve files from a configured directory before the Worker runs, with optional Worker-first path patterns."
+---
+
+Static assets let a service answer `GET` and `HEAD` from files on disk without entering the isolate. Configure `assets.directory` on the service. Peren maps the request path under that directory and returns the file when it exists. Paths that miss a file, or that `run_worker_first` selects, go to the Worker.
+
+<SystemDiagram name="assets" />
+
+A binding with `type = "assets"` is accepted when the service also configures `assets`, but that binding is not hydrated onto `env`. Static serving is owned by the node request path, not by a Worker-facing object.
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- A project directory with a fleet file, a Worker, and an assets directory
+- Development certificates from `peren devcert ./certs`, with `[mtls]` paths edited to match the files on disk
+
+`peren init` writes `leaf.pem` and `leaf.key` into `[mtls]`. `peren devcert ./certs` writes `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`. Edit `[mtls]` after `peren devcert` so the leaf paths name those files.
+
+## Configure
+
+Create `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "file"
+path = "./data"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "site"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.assets]
+directory = "./public"
+run_worker_first = ["/api/*"]
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "site"
+```
+
+`directory` is required when `assets` is set. `run_worker_first` is optional. A boolean `true` sends every path to the Worker before static lookup. A string array matches an exact path, `*`, or a prefix when the pattern ends with `*`. At most 100 patterns are accepted.
+
+Create `public/index.html`:
+
+```html
+<!doctype html>
+<title>Peren assets</title>
+<h1>Peren assets</h1>
+```
+
+Create `worker.js`:
+
+```js
+export default {
+  fetch(request) {
+    return Response.json({ path: new URL(request.url).pathname });
+  },
+};
+```
+
+## Request path
+
+For each public request:
+
+1. If `run_worker_first` matches the URI path, Peren skips static lookup and dispatches the Worker.
+2. Otherwise, for `GET` and `HEAD` only, Peren resolves the path under `directory`. `/` maps to `index.html`. Segments that are empty, `.`, `..`, or contain `\` are refused.
+3. A readable file returns status 200 with a content type derived from the extension. `HEAD` returns headers and an empty body.
+4. A missing file or a directory path continues to the Worker.
+
+Other methods never take the static path. They go to the Worker.
+
+## Run and verify
+
+```sh
+peren serve fleet.toml
+```
+
+Use `peren serve` so the configured public port remains. `peren dev` rebinds loopback listeners to free ports for that session.
+
+```sh
+curl http://127.0.0.1:8080/
+curl http://127.0.0.1:8080/api/status
+```
+
+The first response is the HTML from `public/index.html`. The second is JSON from the Worker because `/api/*` is Worker-first.
+
+## Failure
+
+A path that escapes the assets directory, such as `/../secret`, returns status 400. Keep asset URLs as ordinary path segments under the site root.
+
+## Related
+
+- [Workers](/docs/build/workers/)
+- [Web platform APIs](/docs/concepts/web/)
+- [Configuration reference](/docs/reference/configuration/)

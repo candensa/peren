@@ -1,0 +1,97 @@
+---
+title: "KV example"
+description: "Store a value with native KV compareAndSet and read it back through a Worker."
+---
+
+This tutorial builds a Worker that writes one KV key with `compareAndSet` on the native backend and returns the stored value and version.
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- An empty project directory
+
+## Create the files
+
+Create `worker.js`:
+
+```js
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const key = url.searchParams.get("key") ?? "message";
+    if (request.method === "PUT") {
+      await env.KV.compareAndSet(key, { missing: true }, await request.text());
+      return new Response(null, { status: 204 });
+    }
+    const value = await env.KV.get(key);
+    const record = await env.KV.getWithMetadata(key);
+    return Response.json({
+      provider: env.KV.provider.kind,
+      value: value ?? "",
+      version: record.version,
+    });
+  },
+};
+```
+
+Create `peren.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.KV]
+type = "kv"
+namespace = "demo"
+unique_key = "demo"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+## Run
+
+```sh
+peren devcert ./certs
+peren dev peren.toml
+```
+
+`peren devcert` writes `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`. `peren dev` binds loopback listeners on port 0 and uses a memory bucket for the session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```sh
+curl -X PUT "http://127.0.0.1:54321/?key=message" --data "hello"
+curl "http://127.0.0.1:54321/?key=message"
+```
+
+Expected JSON:
+
+```json
+{"provider":"native","value":"hello","version":1}
+```
+
+## Failure
+
+A second PUT with `{ missing: true }` does not replace the value. Native `compareAndSet` returns `{ ok: false, version: 1 }` when the key already exists. This Worker returns 204 without checking `result.ok`, so GET still returns `"hello"` and `version` `1`. Check `result.ok`, or pass `{ version: n }`, when you need a conditional update.
+
+`compareAndSet` works on the native backend only. On Redis or bucket backends it throws `Error("KV compareAndSet is only supported by native KV")`.
+
+## Next
+
+Binding methods, backends, and limits: [KV](/docs/bindings/kv/).

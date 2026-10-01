@@ -1,0 +1,45 @@
+---
+title: "Alarms"
+description: "How a node dispatches a Worker alarm() handler, and why Worker code cannot schedule one through storage."
+---
+
+A node can dispatch an alarm for a cell and run the cell Worker's `alarm` handler. The JavaScript storage object has no `setAlarm`, `getAlarm`, or `deleteAlarm`. Worker code cannot schedule an alarm through storage.
+
+<SystemDiagram name="alarms" />
+
+## Dispatch
+
+When the node dispatches an alarm for a cell, it acquires ownership, restores published replica bytes when they exist, activates the cell Worker, and calls the default export:
+
+```js
+export default {
+  async alarm(env) {
+    await Peren.storage.transaction(async (storage) => {
+      await storage.put("last-alarm", String(Date.now()));
+    });
+  },
+  async fetch() {
+    const value = await Peren.storage.get("last-alarm");
+    if (value === undefined) {
+      return new Response("no alarm yet\n");
+    }
+    return new Response(`${new TextDecoder().decode(value)}\n`);
+  },
+};
+```
+
+Peren calls `alarm(env, {})` on `export default` when that function exists. The second argument is an empty object. It does not expose `waitUntil`.
+
+If `alarm` is missing or is not a function, dispatch completes without calling Worker code.
+
+Alarm handlers that write cell state use `Peren.storage` the same way an HTTP handler does. See [Durable Objects in Peren](/docs/state/objects/).
+
+## Overlap
+
+The node refuses a second alarm dispatch for the same cell while one is already active. That refusal is `AlarmOverlap`. After the active dispatch finishes, a later dispatch for that cell can run.
+
+## Scheduling limit
+
+There is no Worker-facing scheduling API on `Peren.storage` and no documented CLI that schedules or fires alarms. Write an `alarm` handler when the node can dispatch one; do not expect `setAlarm` or a Cloudflare-shaped storage alarm surface to schedule work from application code.
+
+Read [Durable Object namespaces](/docs/state/namespace/) for stub addressing and [Build your first Durable Object](/docs/start/durable/) for SQLite-backed cell state.

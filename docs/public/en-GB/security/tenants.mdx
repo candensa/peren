@@ -1,0 +1,84 @@
+---
+title: "Tenant isolation"
+description: "What tenant revoke and delete write, and what you still do to stop traffic."
+---
+
+A tenant is a customer or team named in the fleet file. Revoke and delete write a registry under the data directory. Those writes do not stop a running isolate.
+
+## Tenant record
+
+**What it covers:** the declared tenant identity and the registry that records revoke and delete actions.
+
+**What Peren does:** each `[[tenants]]` entry must declare a unique `id` and a `cell_quota`. Projects and other config that name a `tenant_id` must reference a declared tenant. `peren tenant revoke` and `peren tenant delete` accept only tenants declared in that config.
+
+```toml
+[[tenants]]
+id = "acme"
+cell_quota = 10
+```
+
+The registry file is `tenants/tenants.json` under `PEREN_DATA_DIR`, or under `./data` when that variable is unset. It stores revocations, deletions, and an audit list.
+
+**What you configure:** which tenant ids appear in the fleet file, who may run revoke or delete, and what operational action follows a registry write.
+
+**What you can check:** config validation rejects unknown or duplicate tenant ids; revoke and delete refuse tenants that are not declared.
+
+## Revoke and delete write the registry
+
+**What it covers:** the active revocation or deletion record for a tenant.
+
+**What Peren does:** `peren tenant revoke` writes an active revocation with `revoked_at_ms`, optional reason, and an audit entry. Prior active revocations for the same tenant become inactive. Revoke refuses a tenant that already has an active deletion.
+
+`peren tenant delete` writes an active deletion with `deleted_at_ms`, optional reason, and an audit entry. Prior active deletions and revocations for that tenant become inactive.
+
+```sh
+peren tenant revoke fleet.toml --tenant-id acme --reason abuse
+peren tenant delete fleet.toml --tenant-id acme --reason offboarded
+```
+
+Representative output:
+
+```text
+revoked acme reason=abuse
+deleted acme reason=offboarded
+```
+
+**What you configure:** stopping or replacing running work after the registry write. A running isolate does not read `tenants.json` to deny a request. Revoke and delete do not close sockets, unload bundles, or change admission on a live process.
+
+**What you can check:** revoke and delete update the registry and print the tenant id; the HTTP request path does not call that registry.
+
+## Stopping traffic
+
+Registry writes alone leave existing listeners and isolates serving. To stop traffic for a tenant's work, the operator must change the path that still reaches it. Concrete actions that stop requests:
+
+1. Stop the Peren process that serves the sockets for that tenant's services.
+2. Remove or block the public route at the reverse proxy, load balancer, or firewall that forwards to those sockets.
+3. Start a process from a fleet file that no longer loads the services or sockets that should stay offline.
+
+Node-wide `POST /control/v1/node/drain` on the peer listener returns 503 for new work on that node. That control path is not tenant-scoped.
+
+## Minted tokens are not request-path checks
+
+**What it covers:** a scoped credential token minted for operator or automation use.
+
+**What Peren does:** `peren credential mint` signs a token with tenant, bucket prefix, and scopes, then prints the token to stdout. The token expires 15 minutes after mint. Scopes must be non-empty ASCII tokens using letters, digits, and `:`, `-`, `_`, or `.`.
+
+```sh
+peren credential mint ./credential-keys \
+  --tenant acme \
+  --bucket-prefix tenants/acme \
+  --scope r2:read \
+  --scopes r2:write
+```
+
+A minted token carries a tenant, a bucket prefix, and scopes. Peren does not check it on Worker or R2 requests.
+
+**What you configure:** who receives minted tokens, where they are presented, and any verification performed outside the Worker request path.
+
+**What you can check:** mint prints one token. Peren does not check that token on Worker requests. See [Credentials and secrets](/docs/security/credentials/).
+
+## Related
+
+- [Security model](/docs/security/overview/)
+- [Credentials and secrets](/docs/security/credentials/)
+- [Worker isolation](/docs/security/isolation/)

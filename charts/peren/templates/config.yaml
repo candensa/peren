@@ -1,0 +1,12 @@
+{{- if not .Values.config.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "peren.configName" . }}
+  labels:
+    {{- include "peren.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  {{ .Values.config.fileName }}: |
+{{ .Values.config.inline | indent 4 }}
+{{- end }}

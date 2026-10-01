@@ -1,0 +1,8 @@
+---
+title: "Peren documentation"
+description: "Run Cloudflare-style Workers and Durable Objects on infrastructure you control."
+---
+
+Peren runs Cloudflare-style Workers and Durable Objects on infrastructure you control, with SQLite-backed state, bucket-backed recovery, and operator-visible fleet behavior. A Worker handles events in a V8 isolate. A cell owns durable state for one routed identity. A node is one running Peren process. A fleet is one or more nodes that share storage and peer identity.
+
+Start with [Start Peren locally](/docs/start/). Install Peren, run one Worker, add one cell, and read its state after a restart. Use [Move from local development to production](/docs/start/production/) before you serve traffic from a single server.

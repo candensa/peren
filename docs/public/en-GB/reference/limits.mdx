@@ -1,0 +1,47 @@
+---
+title: "Limits and defaults"
+description: "Fleet [limits] fields, defaults, and whether the live HTTP path enforces them."
+---
+
+Fleet `[limits]` values are parsed into the process. Only some fields are applied on the live HTTP and admission path. The others are stored and validated where noted.
+
+## Fleet `[limits]`
+
+| Field | Default | Live path |
+| --- | --- | --- |
+| `max_request_body_bytes` | `33554432` (32 MiB) | Enforced. Oversized bodies are refused on the HTTP path. |
+| `max_heap_bytes` | `134217728` (128 MiB) | Enforced as the isolate heap limit. Config validation requires at least 16 MiB. |
+| `max_execution_time_ms` | `30000` | Enforced as the isolate wall-clock limit. Must be greater than zero. |
+| `max_subrequests_per_invocation` | `10000` | Enforced per invocation. |
+| `max_isolates` | `256` | Enforced as concurrent top-level admission capacity. Must be greater than zero. |
+| `max_cpu_time_ms` | `30000` | Stored only. Not applied on the live HTTP path. |
+| `isolate_fair_share_percent` | `25` | Stored. Validated in `1..=100`. Not wired into the live HTTP path. |
+| `checkpoint_threshold_bytes` | `4194304` (4 MiB) | Stored only. |
+| `cron_retry_base_ms` | `2000` | Stored. Validated when cron retries are enabled. Not wired into the live HTTP path. |
+| `cron_retry_max_attempts` | `6` | Stored only. |
+| `cron_retry_max_backoff_ms` | `64000` | Stored only. |
+| `max_steps_per_instance` | `100000` | Stored only. |
+
+Call out: set `max_cpu_time_ms` if you want the value recorded for operators and tooling. It does not cap CPU on requests today. Use `max_execution_time_ms` for wall-clock refusal.
+
+The live HTTP path builds isolate and invocation limits from the fleet `[limits]` values above.
+
+## Queue message limits
+
+Memory and file-backed queue send paths enforce:
+
+| Limit | Value |
+| --- | --- |
+| Max message body | `128000` bytes |
+| Max messages per batch | `100` |
+| Max batch payload | `256000` bytes |
+| Delay | `0` through `86400` seconds |
+
+A message or batch outside these bounds is refused by the broker. See [Queues](/docs/bindings/queues/).
+
+## Related
+
+- [Runtime API reference](/docs/reference/runtime/)
+- [Workers](/docs/build/workers/)
+- [Unsupported and refused behavior](/docs/deployment/unsupported/)
+- [Configuration reference](/docs/reference/configuration/)

@@ -1,0 +1,48 @@
+---
+title: "Operations overview"
+description: "Observe a fleet before changing membership, secrets, deployments, or data directories."
+---
+
+Check health before you change fleet state. Start with readiness and metrics, then use diagnostics, deployment health, and event streams.
+
+## Observe first
+
+```sh
+peren node health peren.toml
+peren status peren.toml
+peren diagnose peren.toml
+peren deploy health peren.toml --service api
+peren tail peren.toml --service api --level error
+```
+
+`/healthz`, `/readyz`, and `/metrics` are available on configured listeners. An operator may scrape `/metrics` with Prometheus. `peren logs` and `peren tail` require `--service`. See [Observability](/docs/operations/observability/).
+
+## Lifecycle commands that write registries
+
+These commands update JSON under the data directory. They do not start a process and they do not move cells:
+
+- `peren node drain` — marks a node draining in the fleet registry
+- `peren node remove` — marks a node removed after a drain record exists, unless `--force`
+- `peren deploy` / `peren rollback` — update deployment generation records
+
+Live refusal of new work on a running process is separate: `POST /control/v1/node/drain` on the peer listener. See [Drain a node](/docs/operate/drain/).
+
+## Backup and upgrade
+
+<Warning>
+`peren backup` copies `PEREN_DATA_DIR`. It is not a live consistent snapshot of a running process. Stop or quiesce writers when you need a consistent copy.
+</Warning>
+
+```sh
+peren backup peren.toml --output ./backup-data
+peren upgrade check peren.toml
+peren upgrade plan peren.toml
+```
+
+`peren upgrade check` tests the configured bucket. `peren upgrade plan` prints the steps and does not run them. See [Plan upgrades](/docs/operate/upgrade/).
+
+## When something is wrong
+
+A ready listener can still have a failed provider or a drained cell. Start from the symptom, then check storage, peer readiness, and cell behavior. See [Degraded operation](/docs/operations/degraded/).
+
+Related: [Drain a node](/docs/operate/drain/), [Rotate secrets](/docs/operate/secrets/), [Deploy and roll back](/docs/deployment/deploy/).

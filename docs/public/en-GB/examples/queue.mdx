@@ -1,0 +1,106 @@
+---
+title: "Queue example"
+description: "Enqueue a message through a memory queue binding and acknowledge the consumer batch."
+---
+
+This tutorial builds a Worker that sends one message on each HTTP request and consumes the batch with a `queue` handler.
+
+<SystemDiagram name="queue" />
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- An empty project directory
+
+## Create the files
+
+Create `worker.js`:
+
+```js
+export default {
+  async fetch(request, env) {
+    await env.JOBS.send(
+      { path: new URL(request.url).pathname },
+      { dedupId: crypto.randomUUID() },
+    );
+    return Response.json({ queued: true, provider: env.JOBS.provider.kind });
+  },
+
+  async queue(batch) {
+    console.log("jobs ready after lease", batch.metrics.ready);
+    batch.ackAll();
+  },
+};
+```
+
+Create `peren.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[queues]
+broker = "memory"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+consumes_queues = [{ queue = "jobs", max_batch_size = 10, max_retries = 3, dead_letter_queue = "dead" }]
+
+[services.bindings.JOBS]
+type = "queue"
+queue_name = "jobs"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+The memory broker keeps messages in the process. They disappear when the process exits.
+
+## Run
+
+```sh
+peren devcert ./certs
+peren dev peren.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for the session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```sh
+curl http://127.0.0.1:54321/demo
+```
+
+Expected JSON:
+
+```json
+{"queued":true,"provider":"memory"}
+```
+
+Peren leases the message and calls `queue`. The handler acknowledges the batch with `ackAll`.
+
+## Failure
+
+A body larger than 128000 bytes is refused in the isolate before the broker receives it:
+
+```js
+await env.JOBS.send("x".repeat(128001));
+```
+
+The call throws `RangeError: Queue message body exceeds 128000 bytes`. Shrink the body or split the work across messages.
+
+## Next
+
+Brokers, consumer policy, and operator commands: [Queues](/docs/bindings/queues/).

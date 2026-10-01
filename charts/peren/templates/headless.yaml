@@ -1,0 +1,17 @@
+{{- if .Values.headlessService.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "peren.fullname" . }}-headless
+  labels:
+    {{- include "peren.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "peren.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: peer
+      port: {{ .Values.service.peerPort }}
+      targetPort: peer
+{{- end }}

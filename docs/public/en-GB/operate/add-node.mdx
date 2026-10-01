@@ -1,0 +1,73 @@
+---
+title: "Add a node"
+description: "Mint a join token and write active membership in the local fleet registry."
+---
+
+Record a new node in the local fleet registry so membership lists the peer address from a verified join token.
+
+`peren credential node` mints the token. `peren node join` verifies it and writes an active membership record under the data directory. Neither command starts a Peren process or moves cells.
+
+<SystemDiagram name="add-node" />
+
+## Prerequisites
+
+- a key directory shared for mint and verify;
+- a fleet config for the host that will hold the registry write;
+- a UUID for the joining node and the peer listen address that belongs in the token.
+
+## Mint a join token
+
+Required:
+
+- `key_dir` (positional) — directory holding the minting key material;
+- `--cluster` — cluster name embedded in the token;
+- `--node` — node UUID;
+- `--peer-addr` — peer listen address recorded for membership.
+
+```sh
+peren credential node ./credential-keys \
+  --cluster prod \
+  --node 00000000-0000-0000-0000-000000000002 \
+  --peer-addr 127.0.0.1:7001
+```
+
+The command prints one token to stdout. The token expires 15 minutes after mint. Run join before expiry against the same key directory.
+
+## Join the registry
+
+Required:
+
+- config path (positional);
+- `--key-dir` — same key directory used to mint the token;
+- `--token` — token from `peren credential node`.
+
+```sh
+peren node join peren.toml \
+  --key-dir ./credential-keys \
+  --token "$NODE_JOIN_TOKEN"
+```
+
+Representative output:
+
+```text
+node 00000000-0000-0000-0000-000000000002 joined peer=127.0.0.1:7001
+```
+
+State change: writes `nodes.json` under `$PEREN_DATA_DIR/fleet` (or `./data/fleet`). The record is active with the peer address from the token. The command does not start `peren serve` or `peren dev`, and it does not move cells.
+
+## Verification
+
+```sh
+peren node health peren.toml
+```
+
+Start the new node's process separately with its own fleet file, then confirm `/readyz` on its peer and public listeners. Registry membership alone does not prove the process is running.
+
+## Failure
+
+| Result | Cause | Next action |
+| --- | --- | --- |
+| expired or invalid signature | token past 15 minutes, wrong key directory, or corrupted token | mint a new token with the same key directory and join again |
+| invalid node id in token | token `node` field is not a UUID | mint again with a valid `--node` UUID |
+
+Related: [Credentials and secrets](/docs/security/credentials/), [Drain a node](/docs/operate/drain/), [Remove a node](/docs/operate/remove-node/), [Operations overview](/docs/operate/overview/).

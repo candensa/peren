@@ -1,0 +1,32 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000129"
+advertise_addr = "127.0.0.1:7129"
+listen = "127.0.0.1:7129"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "r2"
+worker_bundle_path = "examples/javascript/r2/worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.BUCKET]
+type = "r2_bucket"
+endpoint = "https://s3.example.com"
+bucket = "uploads"
+credential_scope = "uploads"
+region = "us-east-1"
+access_key_env = "R2_ACCESS_KEY_ID"
+secret_key_env = "R2_SECRET_ACCESS_KEY"
+prefix = "tenant/"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8129"
+service = "r2"

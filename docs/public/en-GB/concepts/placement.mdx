@@ -1,0 +1,22 @@
+---
+title: "Placement"
+description: "Ownership as the permission to commit, distinct from any placement preference."
+---
+
+Ownership decides which node may commit state for a cell. Placement preference would decide which node is a good candidate to run that work. Peren enforces ownership through the bucket. It does not currently implement a placement sampler that chooses nodes by weight, region or cache warmth.
+
+<SystemDiagram name="placement" />
+
+## Ownership permission
+
+A node may mutate a cell only while it holds a valid ownership lease for the current epoch. The lease is created or claimed with a conditional write on the bucket. After a successful dispatch, the node releases ownership so the owner field is clear for the next acquisition. Publish and checkpoint check the lease again; a changed ownership record fences the previous holder.
+
+When the ownership record has no owner, any node that can reach the bucket may acquire the cell, restore published replica bytes and serve the next request. When another owner is still recorded, acquisition fails and the request does not commit new state.
+
+## Preference versus permission
+
+Configuration may carry placement-related fields for future or operator tooling. Those fields are not a live placement policy in this release. Do not treat them as a guarantee that work lands on a particular node. The permission that matters for durability is ownership.
+
+`peren node drain` records a draining state in the local fleet registry. It does not move cells and it does not change admission on an already running process. There is no operator command that relocates a cell between nodes.
+
+Read [Architecture](/docs/concepts/architecture/) for the request path and [Recovery after node loss](/docs/state/recovery/) for what happens after a node stops.

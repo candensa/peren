@@ -1,0 +1,30 @@
+services:
+  peren:
+    build:
+      context: ../..
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /var/lib/peren/certs/ca.pem ]; then
+          peren devcert /var/lib/peren/certs
+        fi
+        exec peren serve /etc/peren/config.toml
+    init: true
+    ports:
+      - "7000:7000"
+      - "8080:8080"
+    volumes:
+      - ./config.toml:/etc/peren/config.toml:ro
+      - ./worker.js:/etc/peren/worker.js:ro
+      - peren-data:/var/lib/peren
+    environment:
+      PEREN_DATA_DIR: /var/lib/peren
+    healthcheck:
+      test: ["CMD", "peren", "status", "/etc/peren/config.toml"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+volumes:
+  peren-data:

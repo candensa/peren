@@ -1,0 +1,63 @@
+---
+title: "Network policy"
+description: "Which hosts a Worker may call, where credentials stay, and how to keep the peer port private."
+---
+
+A Worker can call only hosts you allow. Peren sends those requests from the node process. Peer listeners are plain TCP. Keep the peer port off the public network.
+
+<SystemDiagram name="network" />
+
+## No ambient fetch
+
+**What it covers:** every outbound HTTP request a Worker can cause.
+
+**What Peren does:** global `fetch` and outbound binding `fetch` run in the node process. The request host must appear in the service's outbound host set. That set comes from `type = "outbound"` `allowed_hosts`, plus hosts from configured AI, vector, images, or container bindings. A host outside the set fails before Peren sends the request.
+
+There is no ambient network from the isolate. Undeclared hosts do not leave the process.
+
+**What you configure:** which hosts appear in each outbound allowlist and which upstreams those hosts reach.
+
+**What you can check:** `fetch` to a host outside the allowlist fails, and Peren does not send that request. See [Outbound fetch](/docs/bindings/outbound/) and [Outbound network](/docs/bindings/network/).
+
+## Client mTLS and SigV4 outside the isolate
+
+**What it covers:** client certificates and AWS signing keys used on outbound requests.
+
+**What Peren does:** `type = "mtls_certificate"` loads PEM from process environment variables into the host. The Worker receives an opaque handle with no `fetch` method and cannot read the PEM. Pass the handle as `fetch(url, { cf: { mtlsCertificate: env.NAME } })` on a fetch to an allowed host.
+
+`type = "aws_sigv4"` signs in the node process. The Worker calls `env.NAME.fetch`. It does not receive access keys or secrets. Signing overwrites `authorization`, `x-amz-date`, `x-amz-content-sha256`, `x-amz-security-token`, and `host` in the host.
+
+**What you configure:** which PEM and key environment variables exist before listeners open, which hosts those bindings may call, and rotation of that material.
+
+**What you can check:** an mTLS binding on `env` is an object with no PEM. A SigV4 binding does not expose access keys. See [Client mTLS](/docs/bindings/mtls/) and [AWS SigV4](/docs/bindings/sigv4/).
+
+## Redirect targets are not re-checked
+
+**What it covers:** the host reached after an outbound HTTP redirect.
+
+**What Peren does:** allowlist membership for the initial request URL host. Redirect targets of outbound fetch are not checked again against `allowed_hosts`.
+
+**What you configure:** that allowlisted hosts do not redirect to destinations the fleet must not reach, or that upstreams refuse such redirects.
+
+**What you can check:** Peren checks the URL the Worker passed. A redirect can then reach a host that is not in `allowed_hosts`.
+
+## Peer listen and `[mtls]`
+
+**What it covers:** the peer listener and control plane on `[node].listen`.
+
+**What Peren does:** `[mtls]` certificate paths are required in the fleet file. Public sockets and the peer listener accept plain TCP. The process does not terminate inbound TLS with the `[mtls]` material.
+
+Outbound Worker client certificates are a separate `mtls_certificate` binding. They are not peer inbound TLS.
+
+**What you configure:** keeping the peer port off the public network with host firewall rules, security groups, or cluster network policy. Terminate public TLS at a reverse proxy or load balancer in front of public sockets.
+
+**What you can check:** peer and public listeners accept plain TCP. Certificate paths in `[mtls]` do not make those listeners speak TLS. See [Networking and ports](/docs/deploy/networking/).
+
+## Related
+
+- [Outbound network](/docs/bindings/network/)
+- [Outbound fetch](/docs/bindings/outbound/)
+- [Client mTLS](/docs/bindings/mtls/)
+- [AWS SigV4](/docs/bindings/sigv4/)
+- [Networking and ports](/docs/deploy/networking/)
+- [Worker isolation](/docs/security/isolation/)

@@ -1,0 +1,58 @@
+---
+title: "Restore a data directory"
+description: "Replace PEREN_DATA_DIR from a backup directory produced by peren backup."
+---
+
+Restore a prior backup directory into the local data directory so operator state on this host matches the archive.
+
+`peren restore` copies `--input` into `PEREN_DATA_DIR` (or `./data` when that variable is unset). It restores that host's data directory contents. It does not perform cell-by-cell replication across nodes.
+
+## Prerequisites
+
+- a validated fleet config path;
+- a backup directory produced by [Back up a data directory](/docs/operate/backup/);
+- the node process stopped if it would write the same data directory during restore.
+
+## Procedure
+
+Required flags:
+
+- config path (positional);
+- `--input` — backup directory to copy from.
+
+Optional:
+
+- `--force` — delete the existing data directory before writing the restore.
+
+<Warning>
+With `--force`, Peren deletes the existing data directory before copying the backup. Without `--force`, restore refuses when that directory already exists. Confirm the backup path and that you accept loss of the current data directory contents before you continue.
+</Warning>
+
+```sh
+peren restore peren.toml --input ./backup-2026-03-01 --force
+```
+
+Representative output:
+
+```text
+restored ./backup-2026-03-01 to ./data files=12
+```
+
+## Verification
+
+Run one of these prove-it checks after restore:
+
+```sh
+peren status peren.toml
+```
+
+Or start the node and send a request that exercises the restored service state. Matching status or response content proves the data directory contents are usable on this host.
+
+## Failure
+
+| Result | Cause | Next action |
+| --- | --- | --- |
+| restore destination already exists | data directory present and `--force` omitted | stop writers, pass `--force`, or clear the directory only when you accept replacing it |
+| backup source does not exist / input is not a directory | `--input` missing or not a directory | point `--input` at a backup directory from `peren backup` |
+
+Related: [Back up a data directory](/docs/operate/backup/), [Operations overview](/docs/operate/overview/), [Recovery after node loss](/docs/state/recovery/).

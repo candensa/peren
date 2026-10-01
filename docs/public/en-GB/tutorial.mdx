@@ -1,0 +1,97 @@
+---
+title: "Build a stateful Worker"
+description: "Create a Worker with durable cell state, restart the node, and verify recovery."
+---
+
+This tutorial builds the smallest stateful Peren application: one Worker route backed by one Durable Object-style cell. You change state, restart the node, and verify the value remains.
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/)
+- About ten minutes in an empty project directory
+
+## Create the Worker
+
+Create `worker.js`:
+
+```js
+export default {
+  async fetch(request) {
+    const key = new URL(request.url).pathname.slice(1) || "counter";
+    const value = await Peren.storage.transaction(async (storage) => {
+      const current = await storage.get(key);
+      const next =
+        current === undefined
+          ? 1
+          : Number(new TextDecoder().decode(current)) + 1;
+      await storage.put(key, String(next));
+      return next;
+    });
+    return Response.json({ key, value });
+  },
+};
+```
+
+`Peren.storage.put` accepts a string or `Uint8Array`. `get` returns `Uint8Array` or `undefined`. Peren selects a cell from the service name and the first path segment.
+
+## Create the fleet file
+
+```sh
+peren init
+peren devcert ./certs
+```
+
+`peren init` writes only `fleet.toml`. Align `[mtls]` with the files `peren devcert` writes:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "file"
+path = "./data"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+## Run and verify
+
+```sh
+peren serve fleet.toml
+```
+
+```sh
+curl http://127.0.0.1:8080/counter
+curl http://127.0.0.1:8080/counter
+```
+
+Expected bodies end with `"value":1` then `"value":2`. Stop the process, start `peren serve fleet.toml` again from the same directory, and call the route once more. The next body ends with `"value":3` when the same data directory is reused.
+
+## Failure: missing Worker file
+
+If `worker.js` is missing, Peren refuses to start and reports that the Worker module could not be read.
+
+## What you built
+
+Peren routed the request to a cell for the `api` service and the `counter` path, opened SQLite-backed state for that cell, committed the transaction, and reopened the cell after restart.
+
+## Clean up
+
+Stop the process and remove the local `data` directory if you do not need the state.
+
+Next: [Move from local development to production](/docs/start/production/).

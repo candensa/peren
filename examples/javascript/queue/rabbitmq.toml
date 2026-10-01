@@ -1,0 +1,31 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000131"
+advertise_addr = "127.0.0.1:7131"
+listen = "127.0.0.1:7131"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[queues]
+broker = "rabbitmq"
+amqp_url = "amqp://guest:guest@127.0.0.1:5672/%2f"
+
+[[services]]
+name = "producer"
+worker_bundle_path = "examples/javascript/queue/worker.js"
+compatibility_date = "2026-01-01"
+consumes_queues = [{ queue = "jobs", max_batch_size = 10, max_retries = 3, dead_letter_queue = "dead" }]
+
+[services.bindings.JOBS]
+type = "queue"
+queue_name = "jobs"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8131"
+service = "producer"

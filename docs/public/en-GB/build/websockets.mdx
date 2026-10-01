@@ -1,0 +1,104 @@
+---
+title: "WebSockets"
+description: "Upgrade Workers with WebSocketPair and Durable Object hibernation APIs."
+---
+
+Use WebSockets when the Worker or cell must keep a bidirectional connection. Peren upgrades an HTTP response that carries a `WebSocket` from `WebSocketPair`, bridges frames on the node that owns the connection, and exposes hibernation helpers on `DurableObjectState` in the local Peren host model.
+
+Full Cloudflare edge hibernation behavior outside that local host model is unsupported. Durable cell state can recover on another node after failure; the client network connection must reconnect.
+
+## Upgrade a response
+
+Create a `WebSocketPair`, keep one side for the Worker or cell, and assign the client side to `response.webSocket`:
+
+```js
+export default {
+  async fetch() {
+    const pair = new WebSocketPair();
+    pair[1].accept();
+    pair[1].addEventListener("message", (event) => {
+      pair[1].send(event.data);
+    });
+    const response = new Response(null);
+    response.webSocket = pair[0];
+    return response;
+  },
+};
+```
+
+When `response.webSocket` is a `WebSocket`, Peren treats the response as an upgrade. The response body is not returned as HTTP payload.
+
+## Socket methods
+
+Sockets from `WebSocketPair` support:
+
+| Method | Behavior |
+| --- | --- |
+| `accept()` | Marks the socket accepted so queued events deliver |
+| `send(data)` | Sends to the peer or queues outbound host frames |
+| `close(code, reason)` | Closes both sides of the pair when linked |
+| `serializeAttachment(value)` | Persists JSON-serializable attachment bytes through storage |
+| `deserializeAttachment()` | Reads the attachment, or `undefined` when absent |
+| `deleteAttachment()` | Removes the attachment |
+
+`readyState` follows Connecting (0), Open (1), Closing (2) and Closed (3). Message and close handlers use `onmessage`, `onclose` and `addEventListener`.
+
+## Default-export handlers
+
+After upgrade, the node re-enters the isolate for messages and closes:
+
+```js
+export default {
+  async fetch() {
+    const pair = new WebSocketPair();
+    pair[1].accept();
+    const response = new Response(null);
+    response.webSocket = pair[0];
+    return response;
+  },
+
+  async webSocketMessage(socket, message) {
+    socket.send(message);
+  },
+
+  async webSocketClose(socket, code, reason) {
+    socket.close(code, reason);
+  },
+};
+```
+
+`ctx` is `{ waitUntil }` on these paths as well.
+
+## Durable Object hibernation APIs
+
+`DurableObjectState` exposes:
+
+| Method | Behavior |
+| --- | --- |
+| `acceptWebSocket(socket, tags?)` | Accepts the socket and records optional string tags |
+| `getWebSockets(tag?)` | Returns accepted, non-closed sockets, optionally filtered by tag |
+| `setWebSocketAutoResponse(pair)` | Sets or clears a `WebSocketRequestResponsePair` |
+| `getWebSocketAutoResponse()` | Returns the current auto-response pair, or null |
+| `getWebSocketAutoResponseTimestamp()` | Returns the timestamp for the auto-response, or null |
+
+```js
+const pair = new WebSocketPair();
+const state = new DurableObjectState();
+state.acceptWebSocket(pair[1], ["room:alpha"]);
+state.setWebSocketAutoResponse(
+  new WebSocketRequestResponsePair("ping", "pong"),
+);
+const response = new Response(null);
+response.webSocket = pair[0];
+return response;
+```
+
+`WebSocketRequestResponsePair` stores string `request` and `response` values. Matching inbound messages can short-circuit to the configured response before `webSocketMessage` runs.
+
+Accepted-socket metadata and auto-response metadata persist through the local storage host when storage is available. Stateless isolates keep auto-response state in memory only.
+
+## Related
+
+- [Workers](/docs/build/workers/)
+- [Durable Objects](/docs/state/objects/)
+- [Runtime API reference](/docs/reference/runtime/)

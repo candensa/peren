@@ -1,0 +1,27 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000129"
+advertise_addr = "127.0.0.1:7129"
+listen = "127.0.0.1:7129"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "hyperdrive"
+worker_bundle_path = "examples/javascript/hyperdrive/worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.DB]
+type = "hyperdrive"
+pgcat_endpoint = "postgres://app:secret@127.0.0.1:6432/app"
+credential_scope = "db"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8129"
+service = "hyperdrive"

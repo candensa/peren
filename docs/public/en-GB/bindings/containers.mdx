@@ -1,0 +1,115 @@
+---
+title: "Containers"
+description: "Proxy Worker fetch calls to a local container port through a container binding."
+---
+
+A container binding exposes `env.NAME.fetch` that proxies HTTP to `127.0.0.1` on the binding's `default_port`. Peren does not start, stop, or exec into the container through this binding. The process listening on that local port must already be available.
+
+## Prerequisites
+
+- A fleet file with `[node]`, `[bucket]`, `[mtls]`, one service, and one socket
+- A `[containers]` table in the same fleet file
+- A process listening on `127.0.0.1` at the configured `default_port`
+
+## Configure the binding
+
+Write `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[containers]
+max_instances_per_node = 4
+
+[[services]]
+name = "container"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.APP]
+type = "container"
+image = "ghcr.io/example/renderer:latest"
+default_port = 8080
+memory_mb = 256
+cpu_millis = 250
+allow_network_egress = false
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8090"
+service = "container"
+```
+
+Config validation refuses a container binding when `[containers]` is absent. `[containers]` accepts optional `docker_socket` and `max_instances_per_node` (default `32`).
+
+Binding fields:
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `type` | yes | must be `container` |
+| `image` | yes | image reference recorded on the binding |
+| `default_port` | yes | local port `fetch` proxies to |
+| `env` | no | optional string map |
+| `memory_mb` | no | optional memory limit metadata |
+| `cpu_millis` | no | optional CPU limit metadata |
+| `idle_sleep_secs` | no | defaults to `300` |
+| `allow_network_egress` | no | defaults to `false` |
+
+## Call fetch
+
+Write `worker.js`:
+
+```js
+export default {
+  fetch(request, env) {
+    return env.APP.fetch(request);
+  },
+};
+```
+
+`env.APP.fetch` rewrites the request URL to `http://127.0.0.1:{default_port}` and preserves path and query. That is the supported call.
+
+Run the node after the target process is listening on the local port:
+
+```bash
+peren dev fleet.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port. The container port in the binding stays the configured `default_port`.
+
+```bash
+curl -s http://127.0.0.1:54321/health
+```
+
+## Success
+
+The Worker receives the HTTP response from the process on `127.0.0.1:8080`. `env.APP.port` is `8080`. `env.APP.image` is the configured image string.
+
+## Failure
+
+`exec`, `start`, `stop`, `destroy`, `writeFile`, `readFile`, and `status` throw:
+
+```text
+Container.<operation> requires a managed sandbox provider; this binding currently supports fetch() through the configured local port
+```
+
+If `[containers]` is missing, config validation fails with `container binding requires the containers provider`.
+
+If nothing accepts connections on the local port, `fetch` returns status 502 and the connection error as the body.
+
+## Related
+
+- [Outbound fetch](/docs/bindings/outbound/)
+- [Bindings overview](/docs/bindings/overview/)
+- [Credentials and secrets](/docs/security/credentials/)

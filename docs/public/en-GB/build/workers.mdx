@@ -1,0 +1,116 @@
+---
+title: "Workers"
+description: "Write a Peren Worker: default export, handlers, env, ctx, limits and module kinds."
+---
+
+A Worker is JavaScript that Peren loads into a V8 isolate and dispatches for HTTP, schedules, queues and related events. Peren installs the module's `export default` as the entry for those events. A durable object cell constructs the class named by the service entrypoint when the module exports it.
+
+```js
+export default {
+  async fetch(request, env, ctx) {
+    return new Response("hello from Peren\n");
+  },
+};
+```
+
+Configure the service with `worker_bundle_path` and a socket that targets the service. Run a local node with `peren dev` and send a request to the public listener the command prints.
+
+## Module shape
+
+Peren selects the module kind from the file extension:
+
+| Extension | Kind |
+| --- | --- |
+| `.cjs` | CommonJS |
+| `.wasm` | WebAssembly |
+| anything else | JavaScript |
+
+The entry module cannot be WebAssembly. Import `.wasm` modules from a JavaScript or CommonJS entry. Specifiers must resolve inside the configured bundle. Remote package resolution and ambient host filesystem imports are refused.
+
+## Handlers
+
+HTTP dispatch calls `fetch` on the default export:
+
+```js
+export default {
+  async fetch(request, env, ctx) {
+    return new Response(JSON.stringify({ path: new URL(request.url).pathname }), {
+      headers: { "content-type": "application/json" },
+    });
+  },
+};
+```
+
+`fetch` must return a `Response`. Any other return value throws `TypeError: fetch must return a Response`.
+
+Scheduled triggers call `scheduled` when `cron_triggers` are configured on the service:
+
+```js
+export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(Promise.resolve(event.cron));
+  },
+
+  async fetch() {
+    return new Response("cron service\n");
+  },
+};
+```
+
+`event` includes `cron` and `scheduledTime` (milliseconds).
+
+The default export may also define `queue`, `alarm`, `tail`, `workflow`, `activity`, `webSocketMessage` and `webSocketClose`. Peren calls those handlers when the corresponding dispatch path runs. See [Runtime API reference](/docs/reference/runtime/) for signatures.
+
+If the default export has no `fetch` function, Peren falls back to `addEventListener("fetch", ...)`. Prefer the default-export handlers.
+
+## Request context
+
+`ctx` is `{ waitUntil }`. `waitUntil(promise)` registers background work that Peren drains before finishing the invocation. There is no `passThroughOnException` on `ctx`.
+
+```js
+export default {
+  async fetch(request, env, ctx) {
+    ctx.waitUntil(env.JOBS.send({ url: request.url }));
+    return Response.json({ ok: true });
+  },
+};
+```
+
+## Environment
+
+Peren freezes `env` before your handler runs. It contains:
+
+- string values from `[services.vars]`;
+- string values from `[services.secrets]` and secrets-store refs, resolved before listeners open;
+- objects for configured bindings (`type = "kv"`, `d1_database`, `queue`, `service`, `outbound`, and the other binding types Peren places on `env`).
+
+A missing secret fails the process before listeners open. Provider credentials for host-owned backends stay outside Worker-readable values unless the operator places them in a Worker secret.
+
+Static assets are not an `env` binding. When `[[services]]` sets `assets`, Peren serves files from `assets.directory` for matching `GET` and `HEAD` requests before the Worker runs, unless `run_worker_first` sends the path to the Worker first. See [Web platform APIs](/docs/concepts/web/) for the network and crypto surface available inside the isolate.
+
+## Service binding RPC
+
+When a request carries the `x-peren-rpc-method` header, Peren looks up that method name on the default export and calls it with `args` from the JSON body. Successful calls return JSON with content type `application/vnd.peren.rpc+json`. Missing methods return 404. Thrown errors return 500 with the error message. Ordinary `fetch` handling is skipped for those requests.
+
+## Limits
+
+Fleet `[limits]` defaults that the node applies on the live HTTP path:
+
+| Field | Default | Effect |
+| --- | --- | --- |
+| `max_request_body_bytes` | 33554432 (32 MiB) | Refuses oversized request and response bodies |
+| `max_heap_bytes` | 134217728 (128 MiB) | Isolate heap ceiling |
+| `max_execution_time_ms` | 30000 | Wall-clock watchdog for the invocation |
+| `max_subrequests_per_invocation` | 10000 | Cap on requests the node makes for the Worker |
+| `max_isolates` | 256 | Concurrent isolate admission for the process |
+
+`max_cpu_time_ms` defaults to 30000 in config. The live HTTP path does not apply that field when building invocation limits. Wall-clock execution time is the limit that terminates a long request.
+
+When a limit trip fails the dispatch, Peren refuses or terminates that invocation. Adjust `[limits]` or per-service overrides such as `max_heap_bytes` and `max_execution_time_ms` when the workload needs different ceilings.
+
+## Related
+
+- [Web platform APIs](/docs/concepts/web/)
+- [WebSockets](/docs/build/websockets/)
+- [Runtime API reference](/docs/reference/runtime/)
+- [Test applications](/docs/build/testing/)

@@ -1,0 +1,136 @@
+---
+title: "D1"
+description: "Configure a D1 database binding and run SQL through native SQLite or Turso."
+---
+
+D1 exposes SQL to Worker code through `env`. Use it when application state needs tables, prepared statements, and batches. Use KV for single-key records and R2 for object bodies.
+
+Peren implements two backends you can run: `native_sqlite` and `turso`. An `external` backend is refused. Configure and operate native SQLite and Turso in separate procedures because credentials and failure modes differ.
+
+## Methods
+
+| API | Methods |
+| --- | --- |
+| Database | `prepare(sql)`, `exec(sql)`, `batch(statements)` |
+| Statement | `bind(...params)`, `all()`, `first(column?)`, `run()`, `raw()` |
+
+`prepare` returns a statement. `bind` returns a new statement with bound parameters. `all` returns `{ results, success, meta }`. `first` returns the first row, or one column when a column name is passed. `run` returns `{ success, meta, results }`. `raw` returns rows as arrays. `exec` returns `{ count, duration }`. `batch` runs statements in one transaction and returns an array of run-shaped results. `meta` includes `changes` and `last_row_id`.
+
+## Native SQLite
+
+Create `peren.toml` and `worker.js`. Omit `backend` to use `native_sqlite`.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.DB]
+type = "d1_database"
+database_name = "app"
+unique_key = "app"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+```js
+export default {
+  async fetch(_request, env) {
+    await env.DB.exec(
+      "create table if not exists visits (id integer primary key)",
+    );
+    await env.DB.prepare("insert into visits default values").run();
+    const row = await env.DB
+      .prepare("select count(*) as count from visits")
+      .first();
+    return Response.json({ provider: env.DB.provider.kind, ...row });
+  },
+};
+```
+
+### Run and verify
+
+```sh
+peren devcert ./certs
+peren dev peren.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```sh
+curl http://127.0.0.1:54321/
+```
+
+Expected JSON includes `"provider":"native_sqlite"` and a rising `count` on each request.
+
+Native SQLite stores the database through Peren cell storage for the binding. No Turso URL or token is required.
+
+## Turso
+
+This fragment belongs inside the service. Export `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` before starting the node. Optional `replica_path` is resolved under the node data directory when relative.
+
+```toml
+[services.bindings.DB]
+type = "d1_database"
+database_name = "app"
+unique_key = "app"
+backend = { kind = "turso", url_env = "TURSO_DATABASE_URL", token_env = "TURSO_AUTH_TOKEN", replica_path = ".peren/turso/app.sqlite" }
+```
+
+Worker calls stay the same. `env.DB.provider.kind` is `turso`.
+
+### Run and verify
+
+```sh
+export TURSO_DATABASE_URL=libsql://your-database.turso.io
+export TURSO_AUTH_TOKEN=your-turso-token
+peren devcert ./certs
+peren dev peren.toml
+```
+
+Call the `public:` URL `peren dev` prints:
+
+```sh
+curl http://127.0.0.1:54321/
+```
+
+Expected JSON includes `"provider":"turso"` and a `count` field.
+
+### Turso failure
+
+If either named environment variable is missing, Peren refuses to open listeners:
+
+```text
+required environment variable "TURSO_DATABASE_URL" is not set
+```
+
+Set both variables in the process environment, then start the node again.
+
+## External backend
+
+Config can parse `backend = { kind = "external", ... }`. Peren does not hydrate that backend onto `env`, and operator D1 commands refuse it:
+
+```text
+binding "DB" does not use an operator-supported D1 backend
+```
+
+Use `native_sqlite` or `turso`.
+
+Related: [Provider selection](/docs/bindings/providers/), [Bindings overview](/docs/bindings/overview/), [KV](/docs/bindings/kv/).

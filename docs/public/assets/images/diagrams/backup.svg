@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1072 312" role="img" aria-labelledby="title">
+<title id="title">Backup copies the data directory.</title>
+<defs>
+  <marker id="backup-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="backup-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1072" height="312" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="64" width="312" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="88" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">SOURCE</text>
+<rect x="424" y="24" width="624" height="264" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="440" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">OUTPUT</text>
+<path d="M 304.0 148.0 L 380.0 148.0 L 380.0 108.0 L 456.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#backup-end)"/>
+<rect x="313.2" y="155.0" width="57.6" height="22" rx="6" fill="#fbfaf7"/>
+<text x="342.0" y="170.0" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">copies</text>
+<path d="M 596.0 136.0 L 596.0 177.0 L 776.0 177.0 L 776.0 218.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#backup-end)"/>
+<rect x="56" y="120" width="248" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="180" y="153.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">PEREN_DATA_DIR</text>
+<rect x="456" y="80" width="280" height="56" rx="12" fill="#e7f2ee" stroke="#2f5d50" stroke-width="1.6"/>
+<text x="596" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">peren backup output</text>
+<rect x="776" y="180" width="240" height="76" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="896" y="215.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">not a live snapshot</text>
+<text x="896" y="231.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">of a running process</text>
+</svg>

@@ -1,0 +1,9 @@
+{
+  "queues": {
+    "jobs": []
+  },
+  "leases": {},
+  "paused": [],
+  "purged": [],
+  "dedup": {}
+}

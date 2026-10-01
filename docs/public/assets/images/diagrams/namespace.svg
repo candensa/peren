@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1223 296" role="img" aria-labelledby="title">
+<title id="title">idFromName addresses one cell.</title>
+<defs>
+  <marker id="namespace-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="namespace-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1223" height="296" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="24" width="384" height="248" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">ISOLATE</text>
+<rect x="524" y="44" width="675" height="168" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="540" y="68" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">CELL</text>
+<path d="M 216.0 136.0 L 216.0 184.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#namespace-end)"/>
+<path d="M 336.0 212.0 L 446.0 212.0 L 446.0 138.0 L 556.0 138.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#namespace-end)"/>
+<path d="M 896.0 140.0 L 866.0 140.0 L 866.0 138.0 L 836.0 138.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#namespace-end)"/>
+<rect x="56" y="80" width="320" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="216" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">env.COUNTER.idFromName</text>
+<rect x="96" y="184" width="240" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="216" y="217.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">get(id).fetch</text>
+<rect x="556" y="100" width="280" height="76" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="696" y="135.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">cell</text>
+<text x="696" y="151.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">export default</text>
+<rect x="896" y="100" width="271" height="80" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="1031.5" y="145.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">export class is not the entry</text>
+</svg>

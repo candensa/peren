@@ -1,0 +1,80 @@
+name: Vitest Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'vitest-v*'
+    paths:
+      - 'packaging/vitest/**'
+      - '.github/workflows/vitest.yml'
+  pull_request:
+    paths:
+      - 'packaging/vitest/**'
+      - '.github/workflows/vitest.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vitest-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Plugin checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packaging/vitest/package-lock.json
+      - run: npm ci
+        working-directory: packaging/vitest
+      - run: npm run typecheck
+        working-directory: packaging/vitest
+      - run: npm test
+        working-directory: packaging/vitest
+      - run: npm run build
+        working-directory: packaging/vitest
+      - run: npm pack --dry-run
+        working-directory: packaging/vitest
+      - uses: actions/upload-artifact@v7
+        with:
+          name: peren-vitest-plugin
+          path: |
+            packaging/vitest/dist
+            packaging/vitest/package.json
+            packaging/vitest/README.md
+          if-no-files-found: ignore
+
+  publish:
+    name: Publish plugin
+    if: startsWith(github.ref, 'refs/tags/vitest-v')
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: packaging/vitest/package-lock.json
+      - run: npm ci
+        working-directory: packaging/vitest
+      - run: npm run build
+        working-directory: packaging/vitest
+      - run: npm pack --dry-run
+        working-directory: packaging/vitest
+      - run: npm publish --provenance --access public
+        working-directory: packaging/vitest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

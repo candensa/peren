@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1092 328" role="img" aria-labelledby="title">
+<title id="title">RPC is a method on the default export.</title>
+<defs>
+  <marker id="rpc-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="rpc-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1092" height="328" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="60" width="312" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="84" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">CALLER</text>
+<rect x="368" y="60" width="312" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="384" y="84" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">REQUEST</text>
+<rect x="724" y="24" width="344" height="280" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="740" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">CALLEE</text>
+<path d="M 304.0 144.0 L 400.0 144.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#rpc-end)"/>
+<path d="M 648.0 144.0 L 702.0 144.0 L 702.0 108.0 L 756.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#rpc-end)"/>
+<path d="M 524.0 172.0 L 524.0 208.0 L 776.0 208.0 L 776.0 244.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#rpc-end)"/>
+<rect x="56" y="116" width="248" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="180" y="149.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">env.API.method</text>
+<rect x="400" y="116" width="248" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="524" y="149.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">x-peren-rpc-method</text>
+<rect x="756" y="80" width="280" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="896" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">default export method</text>
+<rect x="776" y="216" width="240" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="896" y="249.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">unknown method 404</text>
+</svg>

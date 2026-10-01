@@ -1,0 +1,76 @@
+---
+title: "Provider selection"
+description: "What changes when you choose a KV, D1, R2, or cache provider: durability, scope, and credentials."
+---
+
+A provider is the storage or service behind a binding. Changing the provider changes whether data survives a restart, which credentials you must set, and which methods succeed. Worker method names stay the same only when that provider implements them.
+
+Do not assume providers are equivalent. Prefer the provider whose failure and durability match the data you store.
+
+## What changes with the provider
+
+| Dimension | Question to answer |
+| --- | --- |
+| Durability | Does the value survive process restart on this host, and does it survive node loss? |
+| Scope | Is the data process-local, host-local, shared through Peren cell storage, or owned by an external service? |
+| Credentials | Which environment variables must exist before listeners open? |
+| Check before production | Do you need to run `peren conformance storage` against this endpoint before you rely on it? |
+
+## KV backends
+
+Configured on the binding as `backend` with `kind`. Default is native when `backend` is omitted.
+
+| `backend.kind` | Scope and durability | Credentials | Notable limit |
+| --- | --- | --- | --- |
+| `native` | Peren cell storage for the namespace | None beyond the fleet file | Supports `compareAndSet` |
+| `redis` | External Redis keyed by the namespace | `url_env` must resolve before listeners open | `compareAndSet` throws |
+| `bucket` | S3-compatible object store under a prefix | `access_key_id_env` and `secret_access_key_env` unless the endpoint is `memory://` | `compareAndSet` throws |
+
+See [KV](/docs/bindings/kv/).
+
+## D1 backends
+
+Configured on the binding as `backend` with `kind`. Default is `native_sqlite` when `backend` is omitted.
+
+| `backend.kind` | Scope and durability | Credentials | Notable limit |
+| --- | --- | --- | --- |
+| `native_sqlite` | SQLite through Peren cell storage | None beyond the fleet file | Local cell lifecycle |
+| `turso` | Remote Turso/libSQL database, optional local replica | `url_env` and `token_env` must resolve before listeners open | Missing variables refuse process start |
+| `external` | Parsed in config | Not a supported runtime path | Peren refuses the backend at operator query time and does not hydrate it onto `env` |
+
+Document and operate native SQLite and Turso separately. Their credentials and failure modes differ. See [D1](/docs/bindings/d1/).
+
+## R2 endpoints
+
+The R2 binding always uses `type = "r2_bucket"`. The endpoint string selects the provider Peren attaches:
+
+| Endpoint shape | Provider kind on the Worker | Credentials |
+| --- | --- | --- |
+| Starts with `memory://` | `memory` | None |
+| Any other URL | `s3` | `access_key_env` and `secret_key_env` required; optional `token_env` |
+
+Memory R2 is process-local. S3 R2 durability and availability follow the object store you point at. Qualify an S3-compatible endpoint with `peren conformance storage` before production. See [R2](/docs/bindings/r2/).
+
+## Cache providers
+
+Cache is fleet-wide `[cache]`, not a binding. Every Worker on the node uses the same cache provider through `caches`.
+
+| `[cache].kind` | Scope and durability | Credentials |
+| --- | --- | --- |
+| `memory` | Process memory | None |
+| `kv` | Native KV namespace on the node data directory | `namespace` |
+| `redis` | External Redis | `url_env` |
+| `bucket` | S3-compatible store under a prefix | Access key env vars unless the endpoint is `memory://` |
+
+See [Cache API](/docs/bindings/cache/).
+
+## Fleet bucket versus binding backends
+
+`[bucket]` is the fleet object store for node coordination and recovery. Binding backends such as KV `bucket`, R2 S3, and cache `bucket` are separate capabilities. Changing `[bucket].kind` does not change a Worker KV or R2 binding unless that binding also points at the same store.
+
+## Choosing a path
+
+1. Start local work with native KV, native SQLite D1, memory R2, and memory cache.
+2. Introduce Redis, Turso, or S3 only when you need shared or externally managed durability.
+3. Resolve every named environment variable before starting the node.
+4. Run `peren conformance storage` against the exact S3 endpoint and credentials intended for production when recovery or R2 durability depends on that store.

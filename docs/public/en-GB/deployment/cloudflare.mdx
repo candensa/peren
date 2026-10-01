@@ -1,0 +1,61 @@
+---
+title: "Migrate from Cloudflare Workers"
+description: "Import Wrangler config into Peren TOML and adjust the Worker for Peren's entry, bindings, and network boundaries."
+---
+
+Start from Wrangler input, then resolve every notice before serving traffic. Wrangler is migration input. Native Peren configuration is fleet TOML.
+
+## Import
+
+```sh
+peren migrate wrangler.toml services.toml --from wrangler
+```
+
+`peren config migrate` is the same command. The output is a `[[services]]` fragment. Merge it into a fleet file with `[node]`, `[bucket]`, `[mtls]`, and a socket that targets the service. Validate with `peren config validate fleet.toml`.
+
+What maps into TOML, what becomes a notice, and what refuses is listed in [Migration overview](/docs/migrate/overview/). Read that page before treating any Cloudflare field as preserved.
+
+## Worker shape that matches
+
+Peren loads `export default` and calls `fetch(request, env, ctx)` with `ctx` limited to `waitUntil`.
+
+```js
+export default {
+  async fetch(request, env, ctx) {
+    ctx.waitUntil(Promise.resolve());
+    return new Response("hello from Peren\n");
+  },
+};
+```
+
+Keep that handler shape when moving code. Named class exports are not the loaded entry. A Durable Object `class_name` in config identifies a namespace binding; it does not replace `export default` as the module Peren installs.
+
+## Differences from Cloudflare Workers
+
+| Cloudflare assumption | Peren behavior |
+| --- | --- |
+| Ambient `fetch` to any host | Host-gated outbound. Allowed hosts come from configured bindings. |
+| Bindings described with Wrangler resource IDs | Bindings use `type` under the service. Cloudflare IDs become notices, not Peren identifiers. |
+| Durable Object class export as the cell entry | Isolate entry remains `export default`. Configure `type = "durable_object_namespace"` separately. |
+| Cloudflare compatibility flag set | Peren keeps a short flag table. Unsupported flags fail migrate. `nodejs_compat` is a partial notice, not Cloudflare Node parity. |
+| Platform-hosted R2, AI, Vectorize, Hyperdrive, mTLS store | Operator supplies endpoints, credential scopes, or PEM env names. Until those values are real, migrate refuses. |
+| Secrets only named in Wrangler | Configure `[services.secrets]` or secrets-store bindings in Peren. Wrangler `secrets.required` becomes a notice. |
+
+## Cutover checklist
+
+1. Import and read every notice.
+2. Fill operator-required binding fields, or remove bindings you are not bringing over.
+3. Move application secrets into Peren secret declarations. Keep provider keys in host env vars. See [Credentials and secrets](/docs/security/credentials/).
+4. Add explicit outbound hosts for any destination the Worker must call.
+5. Run locally with `peren dev` and verify handlers, bindings, and secrets.
+6. Qualify the production bucket with `peren conformance storage` before multi-node recovery depends on it.
+7. Deploy a verified generation and keep rollback ready during cutover.
+
+Do not migrate by exposing cloud credentials to Worker code or by assuming unsupported Cloudflare flags still apply.
+
+## Related
+
+- [Migration overview](/docs/migrate/overview/)
+- [Compatibility and provider requirements](/docs/deployment/compatibility/)
+- [Workers](/docs/build/workers/)
+- [Security model](/docs/security/overview/)

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1152 312" role="img" aria-labelledby="title">
+<title id="title">The counter lives in this process.</title>
+<defs>
+  <marker id="rate-limit-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="rate-limit-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1152" height="312" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="24" width="612" height="264" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">PROCESS A</text>
+<rect x="664" y="24" width="464" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="680" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">PROCESS B</text>
+<path d="M 216.0 108.0 L 276.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#rate-limit-end)"/>
+<path d="M 356.0 136.0 L 356.0 168.0 L 346.0 168.0 L 346.0 200.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#rate-limit-end)"/>
+<path d="M 356.0 136.0 L 356.0 168.0 L 534.0 168.0 L 534.0 200.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#rate-limit-end)"/>
+<path d="M 856.0 108.0 L 916.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#rate-limit-end)"/>
+<rect x="56" y="80" width="160" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="136" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">request</text>
+<rect x="276" y="80" width="160" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="356" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">limit()</text>
+<rect x="276" y="200" width="140" height="56" rx="12" fill="#e7f2ee" stroke="#2f5d50" stroke-width="1.6"/>
+<text x="346" y="233.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">allowed</text>
+<rect x="464" y="200" width="140" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="534" y="233.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">refused</text>
+<rect x="696" y="80" width="160" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="776" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">request</text>
+<rect x="916" y="80" width="180" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="1006" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">own counter</text>
+</svg>

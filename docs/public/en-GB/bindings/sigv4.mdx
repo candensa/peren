@@ -1,0 +1,92 @@
+---
+title: "AWS SigV4"
+description: "Sign outbound AWS requests in the node process without exposing keys to the Worker."
+---
+
+An AWS SigV4 binding signs requests in the node process. The Worker calls `env.NAME.fetch`. It does not receive `accessKeyId` or `secretAccessKey`.
+
+<SystemDiagram name="sigv4" />
+
+## Prerequisites
+
+- A fleet file with `[node]`, `[bucket]`, `[mtls]`, one service, and one socket
+- Non-empty `region`, `service`, and at least one `allowed_hosts` entry
+- For `credential_source = "environment"`, process environment variables named by `access_key_env` and `secret_key_env`
+
+## Configure the binding
+
+Write `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.AWS_BEDROCK]
+type = "aws_sigv4"
+credential_source = "environment"
+region = "us-east-1"
+service = "bedrock"
+allowed_hosts = ["bedrock-runtime.us-east-1.amazonaws.com"]
+access_key_env = "AWS_ACCESS_KEY_ID"
+secret_key_env = "AWS_SECRET_ACCESS_KEY"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+`type` must be `aws_sigv4`. Empty `region`, empty `service`, or empty `allowed_hosts` fails config validation.
+
+Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the process environment. Optional session tokens use `token_env` when you need one.
+
+`credential_source` values `instance_role`, `workload_identity`, and `eks_pod_identity` only read `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` from the process environment. They do not call IMDS or a pod-identity agent.
+
+## Call the binding
+
+Write `worker.js`:
+
+```js
+export default {
+  async fetch(request, env) {
+    return env.AWS_BEDROCK.fetch(
+      "https://bedrock-runtime.us-east-1.amazonaws.com/model/example/invoke",
+      {
+        method: "POST",
+        body: JSON.stringify({ prompt: "hello" }),
+      },
+    );
+  },
+};
+```
+
+The Worker calls `env.AWS_BEDROCK.fetch`. On the binding, `accessKeyId` and `secretAccessKey` are `undefined`.
+
+## Success
+
+Peren signs the request in the node process and overwrites `authorization`, `x-amz-date`, `x-amz-content-sha256`, `x-amz-security-token`, and `host`. The signed request leaves the host. The upstream HTTP status and body are returned to the Worker.
+
+## Failure
+
+A host that is not in `allowed_hosts` throws `TypeError`. Host or signing failure surfaces as `runtime host operation failed`.
+
+## Related
+
+- [Outbound network](/docs/bindings/network/)
+- [Outbound fetch](/docs/bindings/outbound/)
+- [Client mTLS](/docs/bindings/mtls/)

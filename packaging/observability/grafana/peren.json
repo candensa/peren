@@ -1,0 +1,630 @@
+{
+  "uid": "peren-runtime",
+  "title": "Peren Runtime",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "15s",
+  "tags": [
+    "peren",
+    "workers",
+    "runtime"
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Ready listeners",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(peren_ready)",
+          "refId": "ready",
+          "legendFormat": "ready"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Worker listeners",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(peren_listener_worker)",
+          "refId": "workers",
+          "legendFormat": "workers"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Services",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "max(peren_configured_services)",
+          "refId": "services",
+          "legendFormat": "services"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Queue consumers",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "max(peren_configured_queue_consumers)",
+          "refId": "consumers",
+          "legendFormat": "consumers"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Uptime",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "max(peren_process_uptime_seconds)",
+          "refId": "uptime",
+          "legendFormat": "uptime"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Admission active",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(peren_admission_active)",
+          "refId": "active",
+          "legendFormat": "active"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "HTTP request rate",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(peren_http_requests_total[5m]))",
+          "refId": "requests/s",
+          "legendFormat": "requests/s"
+        },
+        {
+          "expr": "sum(rate(peren_http_errors_total[5m]))",
+          "refId": "errors/s",
+          "legendFormat": "errors/s"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 4
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "HTTP latency",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(peren_http_duration_ms_bucket[5m])) by (le))",
+          "refId": "p50",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_http_duration_ms_bucket[5m])) by (le))",
+          "refId": "p95",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(peren_http_duration_ms_bucket[5m])) by (le))",
+          "refId": "p99",
+          "legendFormat": "p99"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Admission lifecycle",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(peren_admission_available)",
+          "refId": "available",
+          "legendFormat": "available"
+        },
+        {
+          "expr": "sum(peren_admission_active)",
+          "refId": "active",
+          "legendFormat": "active"
+        },
+        {
+          "expr": "sum(rate(peren_admission_admitted_total[5m]))",
+          "refId": "admitted/s",
+          "legendFormat": "admitted/s"
+        },
+        {
+          "expr": "sum(rate(peren_admission_completed_total[5m]))",
+          "refId": "completed/s",
+          "legendFormat": "completed/s"
+        },
+        {
+          "expr": "sum(rate(peren_admission_refused_total[5m]))",
+          "refId": "refused/s",
+          "legendFormat": "refused/s"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 4
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Queue throughput",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(peren_queue_messages_total[5m]))",
+          "refId": "messages/s",
+          "legendFormat": "messages/s"
+        },
+        {
+          "expr": "sum(rate(peren_queue_dispatches_total[5m]))",
+          "refId": "dispatches/s",
+          "legendFormat": "dispatches/s"
+        },
+        {
+          "expr": "sum(rate(peren_queue_errors_total[5m]))",
+          "refId": "errors/s",
+          "legendFormat": "errors/s"
+        },
+        {
+          "expr": "sum(rate(peren_queue_sends_total[5m]))",
+          "refId": "sends/s",
+          "legendFormat": "sends/s"
+        },
+        {
+          "expr": "sum(rate(peren_queue_send_errors_total[5m]))",
+          "refId": "send errors/s",
+          "legendFormat": "send errors/s"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 12
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Queue latency",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_queue_dispatch_duration_ms_bucket[5m])) by (le))",
+          "refId": "dispatch p95",
+          "legendFormat": "dispatch p95"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_queue_send_duration_ms_bucket[5m])) by (le))",
+          "refId": "send p95",
+          "legendFormat": "send p95"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Storage commits",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(peren_storage_commits_total[5m]))",
+          "refId": "commits/s",
+          "legendFormat": "commits/s"
+        },
+        {
+          "expr": "sum(rate(peren_storage_rollbacks_total[5m]))",
+          "refId": "rollbacks/s",
+          "legendFormat": "rollbacks/s"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_storage_commit_duration_ms_bucket[5m])) by (le))",
+          "refId": "commit p95",
+          "legendFormat": "commit p95"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 12
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Provider operation rate",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(peren_r2_operations_total[5m]))",
+          "refId": "r2/s",
+          "legendFormat": "r2/s"
+        },
+        {
+          "expr": "sum(rate(peren_kv_operations_total[5m]))",
+          "refId": "kv/s",
+          "legendFormat": "kv/s"
+        },
+        {
+          "expr": "sum(rate(peren_d1_queries_total[5m]))",
+          "refId": "d1/s",
+          "legendFormat": "d1/s"
+        },
+        {
+          "expr": "sum(rate(peren_cache_operations_total[5m]))",
+          "refId": "cache/s",
+          "legendFormat": "cache/s"
+        },
+        {
+          "expr": "sum(rate(peren_ai_runs_total[5m]))",
+          "refId": "ai/s",
+          "legendFormat": "ai/s"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Provider latency p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_r2_duration_ms_bucket[5m])) by (le))",
+          "refId": "r2",
+          "legendFormat": "r2"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_kv_duration_ms_bucket[5m])) by (le))",
+          "refId": "kv",
+          "legendFormat": "kv"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_d1_duration_ms_bucket[5m])) by (le))",
+          "refId": "d1",
+          "legendFormat": "d1"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_cache_duration_ms_bucket[5m])) by (le))",
+          "refId": "cache",
+          "legendFormat": "cache"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_ai_duration_ms_bucket[5m])) by (le))",
+          "refId": "ai",
+          "legendFormat": "ai"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Binding and outbound rate",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(peren_service_fetches_total[5m]))",
+          "refId": "service/s",
+          "legendFormat": "service/s"
+        },
+        {
+          "expr": "sum(rate(peren_object_fetches_total[5m]))",
+          "refId": "durable object/s",
+          "legendFormat": "durable object/s"
+        },
+        {
+          "expr": "sum(rate(peren_outbound_fetches_total[5m]))",
+          "refId": "outbound/s",
+          "legendFormat": "outbound/s"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Binding and outbound latency p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_service_duration_ms_bucket[5m])) by (le))",
+          "refId": "service",
+          "legendFormat": "service"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_object_duration_ms_bucket[5m])) by (le))",
+          "refId": "durable object",
+          "legendFormat": "durable object"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(peren_outbound_duration_ms_bucket[5m])) by (le))",
+          "refId": "outbound",
+          "legendFormat": "outbound"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Errors by subsystem",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(peren_http_errors_total[5m]))",
+          "refId": "http",
+          "legendFormat": "http"
+        },
+        {
+          "expr": "sum(rate(peren_queue_errors_total[5m]))",
+          "refId": "queue",
+          "legendFormat": "queue"
+        },
+        {
+          "expr": "sum(rate(peren_r2_errors_total[5m]))",
+          "refId": "r2",
+          "legendFormat": "r2"
+        },
+        {
+          "expr": "sum(rate(peren_kv_errors_total[5m]))",
+          "refId": "kv",
+          "legendFormat": "kv"
+        },
+        {
+          "expr": "sum(rate(peren_d1_errors_total[5m]))",
+          "refId": "d1",
+          "legendFormat": "d1"
+        },
+        {
+          "expr": "sum(rate(peren_cache_errors_total[5m]))",
+          "refId": "cache",
+          "legendFormat": "cache"
+        },
+        {
+          "expr": "sum(rate(peren_ai_errors_total[5m]))",
+          "refId": "ai",
+          "legendFormat": "ai"
+        },
+        {
+          "expr": "sum(rate(peren_service_errors_total[5m]))",
+          "refId": "service",
+          "legendFormat": "service"
+        },
+        {
+          "expr": "sum(rate(peren_object_errors_total[5m]))",
+          "refId": "object",
+          "legendFormat": "object"
+        },
+        {
+          "expr": "sum(rate(peren_outbound_errors_total[5m]))",
+          "refId": "outbound",
+          "legendFormat": "outbound"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 36
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "WebSocket sessions",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(peren_websocket_sessions_total[5m]))",
+          "refId": "accepted/s",
+          "legendFormat": "accepted/s"
+        },
+        {
+          "expr": "sum(peren_websocket_sessions_registered)",
+          "refId": "registered",
+          "legendFormat": "registered"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 36
+      }
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: peren
+description: Peren self-hosted Worker fleet
+version: 0.1.0
+appVersion: 0.1.0
+type: application
+icon: https://raw.githubusercontent.com/candensa/peren/main/docs/public/assets/images/banner.png

@@ -1,0 +1,59 @@
+---
+title: "Read service logs"
+description: "Read the local Peren tail event log for a service with peren logs."
+---
+
+`peren logs` reads recent service events from a node. Filter by service or severity to find failed requests and inspect their status, outcome, and wall time. `peren tail` is the same command under another name.
+
+## What is written
+
+While a node handles requests, Peren appends JSON lines to `$PEREN_DATA_DIR/tail/events.jsonl`, or to `./data/tail/events.jsonl` when `PEREN_DATA_DIR` is unset.
+
+Each line is one of:
+
+- a **request** event: service, method, path, status, outcome, wall time
+- a **console** event: service, Worker console level, message
+
+Worker `console.debug`, `console.log` / `console.info`, `console.warn`, and `console.error` become console events with levels `Debug`, `Info`, `Warn`, and `Error`.
+
+## Command
+
+```sh
+peren logs <config> --service <name> [--level log|warn|error] [--node <node>]
+```
+
+`--service` is required. There is no `--kind` flag. `--node` is accepted and unused.
+
+The command reads the event file once and prints matching lines. It does not follow the file and does not open a live stream.
+
+## Filter by level
+
+| `--level` | Request events | Console events |
+| --- | --- | --- |
+| omitted or `log` | all | all |
+| `warn` | status ≥ 400 | `Warn` and `Error` |
+| `error` | status ≥ 500 | `Error` only |
+
+```sh
+peren logs fleet.toml --service api --level warn
+```
+
+Representative output:
+
+```text
+api POST /checkout status=500 outcome=error wall_time_ms=37
+api console Warn checkout slowed
+api console Error checkout failed
+```
+
+## What `--json` is not
+
+`peren logs` has no `--json` flag. Output is human-readable lines only. The on-disk file is JSONL for the runtime; the CLI does not re-emit that JSON to stdout.
+
+## Difference from `peren tail`
+
+None. See [peren tail](/docs/cli/tail/) for the same steps under the other command name. Flags and output are listed in the [CLI reference](/docs/reference/cli/).
+
+## Failure
+
+Exits `2` if `--service` is omitted. Exits `1` if the service is not in the fleet config or the event file cannot be read.

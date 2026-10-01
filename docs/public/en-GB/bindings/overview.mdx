@@ -1,0 +1,79 @@
+---
+title: "Bindings overview"
+description: "Map Peren bindings to Worker shapes, providers, and the pages that configure each capability."
+---
+
+A binding is a named capability Peren places on the Worker `env` object. A provider is the storage or service behind that capability. Worker code calls the binding. You choose the provider, credentials, and where the data lives.
+
+Cache is not a service binding. Configure it with the fleet-level `[cache]` table and call the global `caches` object. See [Cache API](/docs/bindings/cache/).
+
+## Binding versus provider
+
+| Concern | Binding | Provider |
+| --- | --- | --- |
+| Where it is declared | Under `[services.bindings.NAME]` with `type` | Nested fields such as `backend`, or fleet tables such as `[cache]` and `[bucket]` |
+| What Worker code sees | `env.NAME` methods and properties | `provider.kind` when the binding exposes it |
+| Who holds credentials | Never the Worker for host-owned providers | Process environment variables named in the config |
+| What changes when you swap provider | Method names stay the same when that provider implements them | Durability, scope, credentials, and failures change |
+
+Do not treat providers as interchangeable. Native KV supports `compareAndSet`. Redis and bucket KV throw on that method. Native SQLite and Turso both accept D1 calls, but Turso requires environment credentials before listeners open. Memory R2 and S3 R2 share `put`, `get`, `delete`, and `list`, but only S3 needs access keys and a real endpoint.
+
+## Worker shapes
+
+Each binding sets `type` in TOML. These are the values Peren accepts for the capabilities in this section:
+
+| Binding `type` | Worker surface | Configure and call |
+| --- | --- | --- |
+| `kv` | `env.NAME.get`, `getWithMetadata`, `put`, `compareAndSet`, `delete`, `list` | [KV](/docs/bindings/kv/) |
+| `d1_database` | `env.NAME.prepare`, `exec`, `batch`; statement `bind`, `all`, `first`, `run`, `raw` | [D1](/docs/bindings/d1/) |
+| `r2_bucket` | `env.NAME.put`, `get`, `delete`, `list`; object `arrayBuffer`, `text`, `json` | [R2](/docs/bindings/r2/) |
+| `queue` | Queue producer and consumer bindings | [Queues](/docs/bindings/queues/) |
+| `ai` | Model calls through a host-owned provider | [AI](/docs/bindings/ai/) |
+| `vectorize` | Vector index operations | [Vector indexes](/docs/bindings/vector/) |
+| `outbound` | `env.NAME.fetch` with `allowed_hosts` | [Outbound network](/docs/bindings/network/) |
+| `aws_sigv4` | Signed outbound fetch | [Outbound network](/docs/bindings/network/) |
+| `mtls_certificate` | Client certificate object for `fetch` options | [Outbound network](/docs/bindings/network/) |
+| `container` | Container `fetch` to a local port | [Containers](/docs/bindings/containers/) |
+
+Secrets appear as strings on `env` when declared under the service. See [Secrets](/docs/bindings/secrets/).
+
+## Where a binding sits in the fleet file
+
+Bindings belong inside a service. The service sits in a complete local fleet file with `[node]`, `[bucket]`, `[mtls]`, and a socket that points at the service:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.KV]
+type = "kv"
+namespace = "demo"
+unique_key = "demo"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+Create development certificates with `peren devcert ./certs` before starting the node. `peren devcert` writes `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`. Run the session with `peren dev peren.toml`. That command binds loopback listeners on port 0 and uses a memory bucket for the session. Call the `public:` URL it prints.
+
+## Next steps
+
+- Choose backends and understand durability differences in [Provider selection](/docs/bindings/providers/).
+- Configure [KV](/docs/bindings/kv/), [D1](/docs/bindings/d1/), [R2](/docs/bindings/r2/), or [Cache](/docs/bindings/cache/).

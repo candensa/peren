@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1230 440" role="img" aria-labelledby="title">
+<title id="title">A newer epoch fences the stale owner.</title>
+<defs>
+  <marker id="recovery-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="recovery-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1230" height="440" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="40" width="241" height="324" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="64" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">FAILED NODE</text>
+<rect x="293" y="40" width="288" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="309" y="64" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">THE BUCKET</text>
+<rect x="609" y="40" width="280" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="625" y="64" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">RECOVERING NODE</text>
+<rect x="917" y="24" width="289" height="392" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="933" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">OUTCOMES</text>
+<path d="M 233.0 124.0 L 325.0 124.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#recovery-end)"/>
+<path d="M 549.0 124.0 L 641.0 124.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#recovery-end)"/>
+<path d="M 857.0 124.0 L 913.5 124.0 L 913.5 108.0 L 970.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#recovery-end)"/>
+<path d="M 549.0 124.0 L 549.0 296.0 L 970.0 296.0 L 970.0 222.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#recovery-end)"/>
+<path d="M 228.0 304.0 L 588.5 304.0 L 588.5 346.0 L 949.0 346.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#recovery-end)"/>
+<rect x="325.4" y="311.0" width="57.6" height="22" rx="6" fill="#fbfaf7"/>
+<text x="354.2" y="326.0" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">fenced</text>
+<rect x="56" y="96" width="177" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="144.5" y="129.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">lease not current</text>
+<rect x="56" y="276" width="172" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="142" y="309.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">stale owner</text>
+<rect x="325" y="96" width="224" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="437" y="129.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">conditional epoch write</text>
+<rect x="641" y="96" width="216" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="749" y="129.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">restore snapshot + WAL</text>
+<rect x="970" y="80" width="204" height="56" rx="12" fill="#e7f2ee" stroke="#2f5d50" stroke-width="1.6"/>
+<text x="1072" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">restored</text>
+<rect x="970" y="184" width="204" height="76" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="1072" y="219.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">rejected</text>
+<text x="1072" y="235.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">epoch moved</text>
+<rect x="949" y="308" width="204" height="76" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="1051" y="343.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">fenced</text>
+<text x="1051" y="359.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">stale owner</text>
+</svg>

@@ -1,0 +1,37 @@
+---
+title: "Durability"
+description: "How cell mutations commit in SQLite and publish recoverable snapshot or WAL records."
+---
+
+A cell keeps its mutable state in SQLite on the owning node. After a dispatch commits, Peren publishes recovery records to the bucket so a later acquisition can rebuild that SQLite database. Durability across process restart or node replacement therefore depends on both the local commit and a successful publish.
+
+<SystemDiagram name="durability" />
+
+## Commit and publish
+
+1. The Worker mutates cell storage through `Peren.storage` inside a transaction or mutation.
+2. SQLite records the committed revision on the owning node.
+3. Peren reads the database image and any new WAL frames, then publishes them to the bucket under the current ownership epoch.
+4. Publication returns a receipt that must match the cell, epoch and generation. A mismatched receipt leaves the cell draining and blocks further mutable dispatch for that resident.
+
+`Peren.storage.mutation` records the callback result under the mutation id. A later call with the same id returns the stored result and does not run the callback again.
+
+## Ownership fencing
+
+A cell has one current owner for mutable work. Peren records ownership with a conditional write on the bucket. Publish and checkpoint refuse when the stored owner is empty or the epoch no longer matches the lease. A fenced cell stops accepting mutable dispatch rather than writing under a stale epoch.
+
+## Provider requirements
+
+The bucket provider must support conditional writes and ranged reads. Those behaviors back ownership updates and replica restore. Before trusting a provider for production recovery, run:
+
+```sh
+peren conformance storage fleet.toml
+```
+
+If `peren conformance storage` fails, do not use that bucket for fleet recovery. Ordinary puts and gets can still succeed.
+
+## Limits
+
+A successful local SQLite commit is not durable for recovery until Peren publishes the corresponding snapshot or WAL records. If the bucket is unreachable during publish, the cell drains and refuses further mutable work until storage is fixed. File and memory buckets are fine for development. Multi-node recovery needs a shared bucket that passes `peren conformance storage`.
+
+Read [Recovery after node loss](/docs/state/recovery/) for operator checks and [Placement](/docs/concepts/placement/) for how ownership differs from preference.

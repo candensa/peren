@@ -1,0 +1,111 @@
+---
+title: "Service bindings"
+description: "Call another configured service from a Worker through fetch or an RPC method proxy."
+---
+
+A service binding puts another service on `env` as a callable target. Use it when one Worker must invoke another service in the same fleet without opening a public socket for that call. Prefer an outbound binding when the target is an external host.
+
+`type` is `service`. `entrypoint` is the name of an existing `[[services]]` entry. Optional `props` and `class_name` are accepted in the fleet file and are not hydrated onto the binding object.
+
+The binding exposes `fetch`. Any other property name is forwarded as an RPC call to the target service. See [Entrypoints and RPC](/docs/build/rpc/).
+
+## Configure
+
+Create `fleet.toml` with two services and `worker.js` for each.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.AUTH]
+type = "service"
+entrypoint = "auth"
+
+[[services]]
+name = "auth"
+worker_bundle_path = "auth.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+`worker.js`:
+
+```js
+export default {
+  async fetch(_request, env) {
+    const response = await env.AUTH.fetch("https://auth.internal/session", {
+      method: "POST",
+      body: "login",
+    });
+    return new Response(`${response.status}:${await response.text()}`);
+  },
+};
+```
+
+`auth.js`:
+
+```js
+export default {
+  async fetch(request) {
+    return new Response(
+      `${new URL(request.url).pathname}:${request.method}:${await request.text()}`,
+      { status: 207 },
+    );
+  },
+  async session(name, details) {
+    return { user: name, role: details.role, issued: true };
+  },
+};
+```
+
+## Run and verify
+
+```sh
+peren devcert ./certs
+peren dev fleet.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port. `peren serve` keeps the listen addresses and bucket kind from the file.
+
+```sh
+curl http://127.0.0.1:54321/
+```
+
+Expected body ends with `207:/session:POST:login`.
+
+RPC uses the same binding. `await env.AUTH.session("ada", { role: "admin" })` returns the object from `auth.js` when the target exports that method.
+
+## Failure
+
+If `entrypoint` does not name a configured service, Peren refuses the fleet file with:
+
+```text
+unknown service binding target
+```
+
+Point `entrypoint` at an existing `[[services]].name`, then start the node again.
+
+## Related
+
+- [Entrypoints and RPC](/docs/build/rpc/)
+- [Bindings overview](/docs/bindings/overview/)
+- [Workers](/docs/build/workers/)

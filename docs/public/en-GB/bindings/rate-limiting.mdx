@@ -1,0 +1,92 @@
+---
+title: "Rate limiting"
+description: "Enforce a process-local request quota through a rate limiter binding."
+---
+
+A rate limiter binding counts calls in the node process and returns whether the current window still allows work. Use it for local development, single-node deployments, or limits that may be enforced independently on each node. Use a shared external service when the quota must apply across the fleet.
+
+<SystemDiagram name="rate-limit" />
+
+`type` is `rate_limiter`. `limit` and `period_secs` must both be greater than zero. Counters live in the node process (`provider.kind` is `memory`). They are not shared across nodes and disappear when the process exits.
+
+## Method
+
+`limit(options?)` increments the counter for `options.key` (default `"default"`) and returns `{ success, limit, remaining, reset }`. `success` is true while the count in the current window is at most `limit`. `reset` is the window end as Unix seconds.
+
+## Configure
+
+Create `fleet.toml` and `worker.js`.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.LIMITER]
+type = "rate_limiter"
+limit = 1
+period_secs = 60
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+```js
+export default {
+  async fetch(request, env) {
+    const key = new URL(request.url).pathname;
+    const result = await env.LIMITER.limit({ key });
+    return Response.json({
+      provider: env.LIMITER.provider.kind,
+      ...result,
+    });
+  },
+};
+```
+
+## Run and verify
+
+```sh
+peren devcert ./certs
+peren dev fleet.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port. `peren serve` keeps the listen addresses and bucket kind from the file.
+
+```sh
+curl http://127.0.0.1:54321/tenant-a
+curl http://127.0.0.1:54321/tenant-a
+```
+
+The first response includes `"success":true` and `"remaining":0`. The second includes `"success":false` and `"remaining":0` for the same key within the window.
+
+## Failure
+
+If `limit` or `period_secs` is `0`, Peren refuses the fleet file with:
+
+```text
+must be greater than zero
+```
+
+Set both fields to a positive integer, then start the node again.
+
+## Related
+
+- [Bindings overview](/docs/bindings/overview/)
+- [Workers](/docs/build/workers/)

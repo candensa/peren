@@ -1,0 +1,148 @@
+---
+title: "R2"
+description: "Configure an R2 bucket binding and call put, get, delete, and list from a Worker."
+---
+
+R2 gives a Worker an object bucket on `env`. Use it for uploads, binary payloads, and objects larger than a KV value. Use KV for small keys and D1 for queryable rows.
+
+The binding type is `r2_bucket`. The endpoint selects memory or S3. Document those paths separately: credentials and failure modes differ.
+
+## Methods
+
+| Method | Behavior |
+| --- | --- |
+| `put(key, body, options?)` | Stores the object. `options.httpMetadata.contentType` and `options.customMetadata` are accepted when present. |
+| `get(key)` | Returns an object or `null`. Object fields: `key`, `size`, `httpMetadata`, `customMetadata`. Body helpers: `arrayBuffer()`, `text()`, `json()`. |
+| `delete(key)` | Deletes one key, or each key when given an array. |
+| `list(options?)` | Returns `{ objects, cursor, truncated }`. Options may include `prefix`, `cursor`, and `limit`. Each listed object has `key`, `size`, and `customMetadata`. |
+
+## Memory endpoint
+
+Create `peren.toml` and `worker.js`. An endpoint that starts with `memory://` uses an in-process store. No access keys are required.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.BUCKET]
+type = "r2_bucket"
+endpoint = "memory://demo"
+bucket = "demo"
+credential_scope = "demo"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+```js
+export default {
+  async fetch(request, env) {
+    const key = new URL(request.url).pathname.slice(1) || "message";
+    if (request.method === "PUT") {
+      await env.BUCKET.put(key, await request.text(), {
+        customMetadata: { uploadedBy: "api" },
+      });
+      return new Response(null, { status: 204 });
+    }
+    const object = await env.BUCKET.get(key);
+    if (object === null) {
+      return Response.json(
+        { provider: env.BUCKET.provider.kind, found: false },
+        { status: 404 },
+      );
+    }
+    return Response.json({
+      provider: env.BUCKET.provider.kind,
+      text: await object.text(),
+      uploadedBy: object.customMetadata.uploadedBy ?? "",
+    });
+  },
+};
+```
+
+### Run and verify
+
+```sh
+peren devcert ./certs
+peren dev peren.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```sh
+curl -X PUT http://127.0.0.1:54321/message --data "hello"
+curl http://127.0.0.1:54321/message
+```
+
+Expected JSON includes `"provider":"memory"`, `"text":"hello"`, and `"uploadedBy":"api"`. Memory objects do not survive process restart.
+
+## S3 endpoint
+
+This fragment belongs inside the service. Export the access-key environment variables before starting the node.
+
+```toml
+[services.bindings.BUCKET]
+type = "r2_bucket"
+endpoint = "https://s3.example.com"
+bucket = "uploads"
+credential_scope = "uploads"
+region = "us-east-1"
+access_key_env = "R2_ACCESS_KEY_ID"
+secret_key_env = "R2_SECRET_ACCESS_KEY"
+prefix = "tenant/"
+```
+
+Optional fields accepted by the binding: `token_env`, `allow_http`, and `prefix`. Worker calls stay the same. `env.BUCKET.provider.kind` is `s3`. Keys passed to the Worker are stored under the configured prefix.
+
+### Run and verify
+
+```sh
+export R2_ACCESS_KEY_ID=your-access-key
+export R2_SECRET_ACCESS_KEY=your-secret-key
+peren devcert ./certs
+peren dev peren.toml
+```
+
+Call the `public:` URL `peren dev` prints:
+
+```sh
+curl -X PUT http://127.0.0.1:54321/message --data "hello"
+curl http://127.0.0.1:54321/message
+```
+
+Expected JSON includes `"provider":"s3"` when the endpoint accepts the credentials. Qualify the exact endpoint with `peren conformance storage` before production recovery depends on it.
+
+### S3 failure
+
+If `access_key_env` or `secret_key_env` is omitted on a non-memory endpoint, Peren refuses to start:
+
+```text
+R2 bucket "uploads" requires access_key_env
+```
+
+If the field names exist but the environment variables are unset:
+
+```text
+required environment variable "R2_ACCESS_KEY_ID" is not set
+```
+
+Set both variables, or switch the endpoint to `memory://` for local development.
+
+Related: [Provider selection](/docs/bindings/providers/), [Bindings overview](/docs/bindings/overview/), [Cache API](/docs/bindings/cache/).

@@ -1,0 +1,31 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000201"
+advertise_addr = "127.0.0.1:7000"
+listen = "0.0.0.0:7000"
+region = "local"
+
+[bucket]
+kind = "file"
+path = "/var/lib/peren/cells"
+
+[queues]
+broker = "file"
+file_path = "/var/lib/peren/queues/broker.json"
+
+[mtls]
+ca_cert_path = "/var/lib/peren/certs/ca.pem"
+leaf_cert_path = "/var/lib/peren/certs/leaf.pem"
+leaf_key_path = "/var/lib/peren/certs/leaf.key"
+
+[[services]]
+name = "app"
+worker_bundle_path = "/etc/peren/worker.js"
+compatibility_date = "2026-01-01"
+
+[services.vars]
+MESSAGE = "Peren is running"
+
+[[sockets]]
+name = "public"
+listen = "0.0.0.0:8080"
+service = "app"

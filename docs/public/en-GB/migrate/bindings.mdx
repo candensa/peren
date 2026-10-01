@@ -1,0 +1,58 @@
+---
+title: "Binding mapping"
+description: "Map Wrangler binding tables to Peren type strings, notices, and operator-required fields."
+---
+
+Wrangler resource kind is not the Peren binding `type`. Migration reads Wrangler tables and emits Peren bindings under `[services.bindings.NAME]` with a `type` discriminant. Fields that cannot identify a Peren resource become notices or operator-input requirements. Unmapped Wrangler tables become field-not-translated notices.
+
+Configure native Peren bindings from [Bindings overview](/docs/bindings/overview/). Import procedure: [Migrate from Cloudflare Workers](/docs/deployment/cloudflare/).
+
+## Wrangler tables that produce bindings
+
+| Wrangler source | Peren `type` | Preserved | Transformed | Notice or refusal |
+| --- | --- | --- | --- | --- |
+| `[[kv_namespaces]]` | `kv` | `binding` → binding name; used as `namespace` | Generated `unique_key`; default native backend | `id` is not translated |
+| `[[d1_databases]]` | `d1_database` | `binding`, `database_name` | Generated `unique_key`; default native backend | `database_id` is not translated |
+| `[[r2_buckets]]` | `r2_bucket` | `binding`, `bucket_name` → `bucket` | Placeholder `endpoint` and `credential_scope` | Needs operator input for real endpoint and credential scope; migrate refuses deploy until resolved |
+| `[[queues.producers]]` | `queue` | `binding`, `queue` → `queue_name` | — | — |
+| `[[durable_objects.bindings]]` | `durable_object_namespace` | `name` → binding name; `class_name` | Generated `unique_key` | `script_name` is not translated |
+| `[[mtls_certificates]]` | `mtls_certificate` | `binding` | Placeholder `cert_pem_env` and `key_pem_env` from `certificate_id` | Needs operator input for PEM environment variable names |
+
+Queue consumers map to `consumes_queues` on the service, not to a producer binding.
+
+## Peren types with no Wrangler migrate path
+
+These `type` values exist in Peren fleet config. The Wrangler importer does not emit them:
+
+| Peren `type` | How you get it |
+| --- | --- |
+| `outbound` | Declare under `[services.bindings.NAME]` with `allowed_hosts`. See [Outbound fetch](/docs/bindings/outbound/). |
+| `aws_sigv4` | Declare under `[services.bindings.NAME]` with region, service, hosts, and credential source. See [AWS SigV4](/docs/bindings/sigv4/). |
+
+## Other Wrangler bindings the importer handles
+
+These are outside the short list above. They still appear in migrate output when present:
+
+| Wrangler source | Peren `type` | Operator consequence |
+| --- | --- | --- |
+| `[ai]` | `ai` | Needs endpoint and credential scope |
+| `[[vectorize]]` | `vectorize` | Needs endpoint and credential scope |
+| `[[hyperdrive]]` | `hyperdrive` | Needs PgCat endpoint and credential scope |
+| `[[workflows]]` | `workflow` | `script_name` and `schedules` become notices |
+| `[[analytics_engine_datasets]]` | `analytics_engine` | Needs credential scope |
+| `[[secrets_store_secrets]]` | `secrets_store_secret` | Missing `secret_name` skips the entry with a notice; `store_id` is not translated |
+| `[[worker_loaders]]` | `loader` | Unknown nested fields become notices |
+| `[[dispatch_namespaces]]` | `dispatcher` | Unknown nested fields become notices |
+| `[[containers]]` | `container` | Requires a matching Durable Object binding name; needs `default_port`; several Cloudflare fields become notices |
+| `[assets]` optional `binding` | `assets` | `html_handling` and `not_found_handling` are not translated |
+
+## Refused Wrangler directives
+
+Import fails for `send_email`, `browser`, and `images`. Unsupported `compatibility_flags` fail import. See [Compatibility dates and flags](/docs/deployment/compatibility-dates/) and [Migration overview](/docs/migrate/overview/).
+
+## Related
+
+- [Migration overview](/docs/migrate/overview/)
+- [Migrate from Cloudflare Workers](/docs/deployment/cloudflare/)
+- [Bindings overview](/docs/bindings/overview/)
+- [Unsupported and refused behavior](/docs/deployment/unsupported/)

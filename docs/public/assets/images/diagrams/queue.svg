@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 312" role="img" aria-labelledby="title">
+<title id="title">send, then ack or retry.</title>
+<defs>
+  <marker id="queue-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="queue-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1120" height="312" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="80" width="248" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="104" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">PRODUCER</text>
+<rect x="300" y="72" width="280" height="164" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="316" y="96" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">BROKER</text>
+<rect x="612" y="24" width="484" height="264" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="628" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">CONSUMER</text>
+<path d="M 240.0 164.0 L 286.0 164.0 L 286.0 166.0 L 332.0 166.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#queue-end)"/>
+<path d="M 548.0 166.0 L 596.0 166.0 L 596.0 108.0 L 644.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#queue-end)"/>
+<path d="M 844.0 108.0 L 924.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#queue-end)"/>
+<path d="M 844.0 108.0 L 884.0 108.0 L 884.0 228.0 L 924.0 228.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#queue-end)"/>
+<rect x="56" y="136" width="184" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="148" y="169.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">producer send</text>
+<rect x="332" y="128" width="216" height="76" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="440" y="163.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">memory broker</text>
+<text x="440" y="179.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">process-local</text>
+<rect x="644" y="80" width="200" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="744" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">queue handler</text>
+<rect x="924" y="80" width="140" height="56" rx="12" fill="#e7f2ee" stroke="#2f5d50" stroke-width="1.6"/>
+<text x="994" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">ack</text>
+<rect x="924" y="200" width="140" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="994" y="233.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">retry</text>
+</svg>

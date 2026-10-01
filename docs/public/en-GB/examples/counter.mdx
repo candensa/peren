@@ -1,0 +1,141 @@
+---
+title: "Durable counter example"
+description: "Address a cell with idFromName and stub.fetch, then increment SQLite-backed state."
+---
+
+This tutorial builds a public Worker that resolves a Durable Object namespace id and forwards the request to an object service. The object service increments a counter through `Peren.storage`.
+
+`class_name` links the namespace binding to the durable-object service. A stub fetch constructs that class when the module exports it. This tutorial puts the cell handler on `export default`, which is what runs when the class is not exported.
+
+Use `peren serve` with a file bucket so the configured public port stays fixed and cell state can survive restart on this host.
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- An empty project directory
+
+## Create the files
+
+Create `worker.js`:
+
+```js
+export default {
+  fetch(request, env) {
+    const id = env.COUNTER.idFromName("main");
+    return env.COUNTER.get(id).fetch(request);
+  },
+};
+```
+
+Create `counter.js`:
+
+```js
+export default {
+  async fetch() {
+    const value = await Peren.storage.transaction(async (storage) => {
+      const current = await storage.get("value");
+      const next =
+        current === undefined
+          ? 1
+          : Number(new TextDecoder().decode(current)) + 1;
+      await storage.put("value", String(next));
+      return next;
+    });
+    return Response.json({ value });
+  },
+};
+```
+
+Create `peren.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "file"
+path = "./data"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.COUNTER]
+type = "durable_object_namespace"
+class_name = "Counter"
+unique_key = "counter"
+
+[[services]]
+name = "counter"
+worker_bundle_path = "counter.js"
+compatibility_date = "2026-01-01"
+
+[services.entrypoint]
+kind = "durable_object"
+class_name = "Counter"
+unique_key = "counter"
+id_from = { source = "first_path_segment" }
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+## Run
+
+```sh
+peren devcert ./certs
+peren serve peren.toml
+```
+
+`peren devcert` writes `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`. Keep the working directory so Peren reopens `./data`.
+
+```sh
+curl http://127.0.0.1:8080/
+curl http://127.0.0.1:8080/
+```
+
+Expected bodies:
+
+```json
+{"value":1}
+```
+
+```json
+{"value":2}
+```
+
+Stop the process with Ctrl+C. Start it again:
+
+```sh
+peren serve peren.toml
+```
+
+```sh
+curl http://127.0.0.1:8080/
+```
+
+Expected body:
+
+```json
+{"value":3}
+```
+
+The third response proves the object service reopened SQLite-backed state for the `main` id after restart.
+
+## Failure
+
+If `class_name` on the namespace binding has no matching durable-object entrypoint, stub fetch fails at the host. Add the object service with the same `class_name`, then restart the node.
+
+## Next
+
+Namespace methods and routing: [Durable Object namespaces](/docs/state/namespace/). Cell storage without a namespace binding: [Build your first Durable Object](/docs/start/durable/).

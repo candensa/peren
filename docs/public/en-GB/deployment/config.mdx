@@ -1,0 +1,168 @@
+---
+title: "Configure a fleet"
+description: "Write a complete fleet TOML for local development, then change listen addresses, bucket storage, and certificates for one server."
+---
+
+Write one fleet TOML that names the node, durable bucket, peer certificate paths, services, and sockets. Peren validates the file before listeners open. Use [Configuration reference](/docs/reference/configuration/) for every field.
+
+## Prerequisites
+
+- An installed `peren` binary
+- A Worker bundle path you will create or already have
+- For local mTLS paths, development certificates from `peren devcert`
+
+## Complete local file
+
+Generate the file, or write it by hand. `peren init` writes this shape with a new `node_id`. It does not create `worker.js`, `./certs`, or `./data`.
+
+```sh
+peren init --output fleet.toml
+peren devcert ./certs
+```
+
+Hand-written equivalent:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "file"
+path = "./data"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+Add a Worker at `worker.js`, then validate and run:
+
+```sh
+peren config validate fleet.toml
+peren dev fleet.toml
+```
+
+`peren dev` prints the topology, then binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `peren serve` keeps the addresses and bucket in the file.
+
+```sh
+curl http://127.0.0.1:54321/
+```
+
+Replace the host and port with the `public:` line from your session. A response from the Worker proves the file loaded, the socket opened, and the isolate dispatched the request.
+
+## Change the file for one server
+
+Keep the same tables. Change three areas.
+
+### Listen addresses
+
+Set `node.listen` to the address this host binds for the peer port. Set `node.advertise_addr` to the address other nodes use to reach this host. Set each `sockets[].listen` to the public bind address.
+
+Loopback (`127.0.0.1`) keeps traffic on this host. Non-loopback or `0.0.0.0` exposes the listener on the host network interfaces you choose. Protect the peer port yourself: inbound peer listeners are plain TCP. `[mtls]` paths are required in the file and are not used to terminate inbound TLS.
+
+### Bucket
+
+For a single host that can keep fleet state on local disk, keep `kind = "file"` and set `path` to a durable directory on that host.
+
+For object-store-backed durability on one server or a multi-host fleet, switch to S3:
+
+```toml
+[bucket]
+kind = "s3"
+endpoint = "https://s3.example.com"
+bucket = "peren-fleet"
+region = "us-east-1"
+credentials_source = "configured"
+access_key_env = "PEREN_BUCKET_ACCESS_KEY"
+secret_key_env = "PEREN_BUCKET_SECRET_KEY"
+```
+
+Export the named environment variables before start. Do not put key material in the TOML.
+
+`credentials_source` values `instance_role`, `workload_identity`, and `eks_pod_identity` select the bucket client's instance-role builder (no static keys in config). That path differs from the Worker AWS SigV4 binding, which reads `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` from the process environment and does not call IMDS. See [AWS SigV4](/docs/bindings/sigv4/).
+
+`kind = "memory"` and `kind = "file"` refuse non-empty `seed_peers` at validation. Use S3-compatible storage when more than one host shares the fleet.
+
+### Certificates
+
+Point `[mtls]` at the CA and leaf material this node presents:
+
+```toml
+[mtls]
+ca_cert_path = "/etc/peren/ca.pem"
+leaf_cert_path = "/etc/peren/leaf.pem"
+leaf_key_path = "/etc/peren/leaf.key"
+```
+
+Use `peren devcert` only for local development. Production paths are operator-supplied files.
+
+## Production-shaped example
+
+```toml
+[node]
+node_id = "b3b6b7f0-2c1a-4e9f-9b1a-0c0f1a2b3c4d"
+advertise_addr = "10.0.4.12:7000"
+listen = "0.0.0.0:7000"
+
+[bucket]
+kind = "s3"
+endpoint = "https://s3.example.com"
+bucket = "peren-fleet"
+region = "us-east-1"
+credentials_source = "configured"
+access_key_env = "PEREN_BUCKET_ACCESS_KEY"
+secret_key_env = "PEREN_BUCKET_SECRET_KEY"
+
+[mtls]
+ca_cert_path = "/etc/peren/ca.pem"
+leaf_cert_path = "/etc/peren/leaf.pem"
+leaf_key_path = "/etc/peren/leaf.key"
+
+[[services]]
+name = "api"
+worker_bundle_path = "/srv/peren/api/worker.js"
+compatibility_date = "2026-01-01"
+
+[services.secrets]
+API_KEY = "API_KEY"
+
+[[sockets]]
+name = "public"
+listen = "0.0.0.0:8080"
+service = "api"
+```
+
+Worker secrets are environment-variable names. Missing secret values fail before listeners open.
+
+## Validate and diagnose
+
+```sh
+peren config validate fleet.toml
+peren diagnose fleet.toml
+```
+
+`peren config validate` prints `valid` and the path when the file passes. Validation refuses `[otlp]` and `[logpush]` in this build. Remove those tables if present.
+
+## Common failures
+
+| Observation | Cause | Next action |
+| --- | --- | --- |
+| validate reports unknown socket service | `sockets[].service` does not match a `services[].name` | fix the name |
+| validate reports bucket field required | S3 without `endpoint` / `bucket`, or file without `path` | add the required fields |
+| process exits before listeners open | missing env for bucket keys or Worker secrets | export the named variables |
+| memory or file bucket with seed peers | multi-process coordination refused | use `kind = "s3"` for a multi-host fleet |
+
+Related: [Configuration reference](/docs/reference/configuration/), [Quickstart](/docs/start/quickstart/), [Object-storage and networking](/docs/deploy/networking/).

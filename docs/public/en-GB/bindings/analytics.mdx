@@ -1,0 +1,86 @@
+---
+title: "Analytics Engine"
+description: "Buffer analytics data points in the node process through an analytics engine binding."
+---
+
+An analytics engine binding accepts data points from Worker code through `writeDataPoint`. Use it when you need a local buffer of structured events during development or single-node runs. The buffer is process-local and capped at 1024 points; older points are dropped when the cap is exceeded.
+
+`type` is `analytics_engine`. `dataset` and `credential_scope` are required. The hydrated object exposes `provider.kind` as `"buffer"` and `provider.dataset` as the configured dataset name.
+
+## Method
+
+`writeDataPoint(point?)` appends one point. Optional fields are `blobs`, `doubles`, and `indexes`. Each missing field becomes an empty array. Peren stores a `timestamp` in milliseconds. The method returns no value.
+
+## Configure
+
+Create `fleet.toml` and `worker.js`.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.ANALYTICS]
+type = "analytics_engine"
+dataset = "requests"
+credential_scope = "analytics"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+```js
+export default {
+  async fetch(_request, env) {
+    env.ANALYTICS.writeDataPoint({
+      blobs: ["request"],
+      doubles: [1.0],
+      indexes: ["tenant"],
+    });
+    return Response.json({
+      provider: env.ANALYTICS.provider.kind,
+      dataset: env.ANALYTICS.provider.dataset,
+    });
+  },
+};
+```
+
+## Run and verify
+
+```sh
+peren devcert ./certs
+peren dev fleet.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port. `peren serve` keeps the listen addresses and bucket kind from the file.
+
+```sh
+curl http://127.0.0.1:54321/
+```
+
+Expected JSON includes `"provider":"buffer"` and `"dataset":"requests"`. There is no Worker API to read buffered points back from `env`.
+
+## Failure
+
+Points beyond the 1024 cap are dropped from the front of the buffer without throwing. If you need durable or fleet-wide analytics retention, write to an external system instead of relying on this binding alone.
+
+## Related
+
+- [Bindings overview](/docs/bindings/overview/)
+- [Workers](/docs/build/workers/)

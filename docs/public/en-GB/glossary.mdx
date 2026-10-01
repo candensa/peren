@@ -1,0 +1,52 @@
+---
+title: "Glossary"
+description: "Peren terms used across the public documentation."
+---
+
+## Worker
+
+Application code executed by the runtime. Peren loads the configured bundle into a V8 isolate and calls `export default` handlers such as `fetch`.
+
+## Cell
+
+One routed stateful object instance with its own SQLite-backed state and owner. For the HTTP path in these docs, Peren derives the cell from the service name and the first path segment.
+
+## Node
+
+One running Peren process participating in a fleet.
+
+## Fleet
+
+One or more Peren nodes that share storage and peer identity.
+
+## Service
+
+A configured Worker bundle and its bindings.
+
+## Binding
+
+A named capability exposed to Worker code through its environment.
+
+## Provider
+
+The storage, queue, or external service a binding uses.
+
+## Owner
+
+The node currently authorised to commit state for a cell.
+
+## Operator
+
+The person or automation responsible for configuring and running Peren.
+
+## Ownership epoch
+
+The monotonically advancing value that fences stale owners. A node that holds an older epoch cannot commit new state for that cell.
+
+## Generation
+
+A recorded version of a deployed service bundle. The record stores a digest and a percentage. The running process keeps serving the bundle it loaded at start.
+
+## Tenant
+
+A customer or team named in the fleet file. Revoking a tenant writes a registry record. That write does not stop a running isolate.

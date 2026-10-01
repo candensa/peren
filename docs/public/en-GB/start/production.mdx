@@ -1,0 +1,37 @@
+---
+title: "Move from local development to production"
+description: "Change a local file-bucket node into a single server you would serve."
+---
+
+A local session can use loopback listeners, a file bucket under `./data`, and development certificates. A single server that serves traffic needs reachable addresses, stable identity, durable disk for the data directory and bucket path, and process supervision the operator controls.
+
+This page is a checklist for that one-server shape. It does not cover multi-node cell migration, live traffic splitting between deployment digests, or inbound mTLS termination on the peer port.
+
+## What changes from the local file bucket
+
+| Local default | Single-server change |
+| --- | --- |
+| `advertise_addr` and `listen` on `127.0.0.1` | Set both to the address peers and operators use to reach this node |
+| Public socket on `127.0.0.1:8080` | Bind the public socket to the address your reverse proxy or clients reach |
+| `[bucket] kind = "file"` under `./data` | Keep `file` only when one host owns the data; place `path` on durable disk for that host |
+| `peren devcert` material under `./certs` | Replace development certificates with operator-managed peer identity files at the `[mtls]` paths |
+| `peren dev` (memory bucket, ephemeral ports) | Run `peren serve fleet.toml` under a process manager so the configured ports and file bucket remain |
+| Default data directory `./data` | Pin `PEREN_DATA_DIR` or the working directory so restarts reopen the same cell databases |
+
+Inbound peer listeners are plain TCP. `[mtls]` paths are required in config. The process does not terminate inbound TLS with those files. Keep the peer port off the public network.
+
+## Checklist before accepting traffic
+
+1. Confirm `node_id` is stable across restarts of this server.
+2. Confirm `advertise_addr`, peer `listen`, and each public socket `listen` match the network you intend to expose.
+3. Confirm `[mtls]` paths exist and are readable only by the process user.
+4. Confirm the file bucket `path` and the data directory sit on durable storage for this host.
+5. Run `peren config validate fleet.toml`.
+6. Start with `peren serve fleet.toml` and confirm the public socket answers a known Worker route.
+7. Restart the process once and confirm Durable Object-style cell state from [Build your first Durable Object](/docs/start/durable/) is still present.
+
+## When one server is not enough
+
+A file bucket is local to one host. When more than one node must share recovery, use an S3-compatible bucket and a multi-node fleet. See [Deployment overview](/docs/deploy/overview/) and [Configuration reference](/docs/reference/configuration/).
+
+Do not treat `peren deploy` percentage fields or registry drain commands as live traffic splitting or automatic cell migration on a running process. Those limits are documented under [Deployment overview](/docs/deploy/overview/).

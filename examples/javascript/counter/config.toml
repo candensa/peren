@@ -1,0 +1,28 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000103"
+advertise_addr = "127.0.0.1:7103"
+listen = "127.0.0.1:7103"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "counter"
+worker_bundle_path = "examples/javascript/counter/worker.js"
+compatibility_date = "2026-01-01"
+entrypoint = { kind = "durable_object", class_name = "Counter", unique_key = "counter", id_from = { source = "first_path_segment" } }
+
+[services.bindings.COUNTER]
+type = "durable_object_namespace"
+class_name = "Counter"
+unique_key = "counter"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8103"
+service = "counter"

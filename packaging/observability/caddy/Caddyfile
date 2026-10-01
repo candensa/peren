@@ -1,0 +1,25 @@
+{
+	# The sample stack terminates HTTP locally. Put TLS at the edge in production
+	# or remove this line and configure a real hostname.
+	auto_https off
+}
+
+:8081 {
+	encode zstd gzip
+
+	@metrics path /metrics
+	handle @metrics {
+		# Keep this listener on a private network, or add Caddy's remote_ip
+		# matcher here before exposing metrics outside the host.
+		reverse_proxy peren:8080
+	}
+
+	handle {
+		reverse_proxy peren:8080 {
+			header_up Host {host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+}

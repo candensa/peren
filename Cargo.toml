@@ -1,0 +1,106 @@
+[workspace]
+resolver = "2"
+members = [
+    "bin/peren",
+    "crates/primitives",
+    "crates/queues",
+    "crates/config",
+    "crates/migrate",
+    "crates/runtime",
+    "crates/storage",
+    "crates/workflow",
+    "crates/replication",
+    "crates/security",
+    "crates/fleet",
+    "crates/cell",
+    "crates/bindings",
+    "crates/node",
+    "crates/operator",
+    "crates/testkit",
+    "crates/providers/objectstore",
+    "crates/providers/turso",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+repository = "https://github.com/candensa/peren"
+
+[workspace.dependencies]
+aes-gcm = "0.10"
+aes = "0.8"
+async-trait = "0.1"
+async-nats = "0.50"
+lapin = "4"
+rdkafka = { version = "0.38", features = ["cmake-build"] }
+axum = { version = "0.8", features = ["ws"] }
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+cbc = "0.1"
+bytes = "1"
+clap = { version = "4", features = ["derive"] }
+cron = "0.15"
+hex = "0.4"
+hyper = "1"
+hyper-util = "0.1"
+futures = "0.3"
+hmac = "0.12"
+fs2 = "0.4"
+object_store = { version = "0.11", features = ["aws", "azure"] }
+pbkdf2 = "0.12"
+rand = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "deflate", "zstd"] }
+ring = "0.17"
+rusqlite = { version = "0.38", features = ["backup", "bundled", "functions", "limits"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+sha1 = "0.10"
+spinoff = { version = "0.8", default-features = false, features = ["arc", "dots", "line"] }
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = "0.29"
+toml = "0.8"
+turso = { version = "=0.8.0-pre.14", default-features = false, features = ["sync"] }
+turso_parser = "=0.8.0-pre.14"
+uuid = { version = "1", features = ["serde", "v4"] }
+wait-timeout = "0.2"
+tempfile = "3"
+
+peren-bindings = { path = "crates/bindings" }
+peren-cell = { path = "crates/cell" }
+peren-config = { path = "crates/config" }
+peren-migrate = { path = "crates/migrate" }
+peren-fleet = { path = "crates/fleet" }
+peren-node = { path = "crates/node" }
+peren-operator = { path = "crates/operator" }
+peren-primitives = { path = "crates/primitives" }
+peren-queues = { path = "crates/queues" }
+peren-provider-object-store = { path = "crates/providers/objectstore" }
+peren-provider-turso = { path = "crates/providers/turso" }
+peren-replication = { path = "crates/replication" }
+peren-runtime = { path = "crates/runtime" }
+peren-security = { path = "crates/security" }
+peren-storage = { path = "crates/storage" }
+peren-testkit = { path = "crates/testkit" }
+peren-workflow = { path = "crates/workflow" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

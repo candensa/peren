@@ -1,0 +1,80 @@
+---
+title: "Migration overview"
+description: "Import Wrangler, SAM, or Serverless Framework config into a Peren service fragment and resolve every notice."
+---
+
+Migration produces Peren TOML for services. It preserves what maps, transforms what has a Peren equivalent, refuses what has no safe mapping, and leaves operator-owned values as notices or hard errors. It never implies silent compatibility with the source platform.
+
+## Commands
+
+`peren migrate` and `peren config migrate` run the same importer.
+
+```sh
+peren migrate wrangler.toml services.toml --from wrangler
+peren migrate template.yaml services.toml --from sam --compatibility-date 2026-01-01
+peren migrate serverless.yml services.toml --from serverless --compatibility-date 2026-01-01
+```
+
+Omit the output path to print the fragment on stdout. Detected formats: `.toml` / `.json` / `.jsonc` as Wrangler; YAML with `AWS::Serverless` or `AWSTemplateFormatVersion` as SAM; YAML with `provider:` or `functions:` as Serverless. Pass `--from` when detection is ambiguous.
+
+The command writes a `[[services]]` fragment only. Merge it into a fleet file that already has `[node]`, `[bucket]`, `[mtls]`, and `[[sockets]]`. Then validate:
+
+```sh
+peren config validate fleet.toml
+```
+
+## What is preserved or transformed
+
+### Wrangler
+
+| Source | Result |
+| --- | --- |
+| `name`, `main`, `compatibility_date`, `compatibility_flags` | Service name, `worker_bundle_path`, date, and flags |
+| `vars` string values | `[services.vars]` |
+| `kv_namespaces` | `type = "kv"` with a generated `unique_key`; Cloudflare `id` becomes a notice |
+| `d1_databases` | `type = "d1"` with a generated `unique_key`; Cloudflare `database_id` becomes a notice |
+| `queues.producers` | `type = "queue"` |
+| `queues.consumers` | `consumes_queues` names |
+| `durable_objects.bindings` | `type = "durable_object_namespace"`; cross-service `script_name` becomes a notice |
+| `services` | `type = "service"` |
+| `triggers.crons` | Five-field Cloudflare crons become six-field Peren expressions by prefixing `0 ` |
+| `assets.directory` / `run_worker_first` | Service `assets` table |
+| `worker_loaders`, `dispatch_namespaces` | Loader and dispatcher bindings |
+| `workflows` | `type = "workflow"`; `script_name` and `schedules` become notices |
+| `secrets_store_secrets` with `secret_name` | Secrets-store secret binding; `store_id` becomes a notice |
+
+R2, AI, Vectorize, Hyperdrive, mTLS certificates, Analytics Engine, and Container entries need operator-supplied endpoints, credential scopes, PEM env names, or `default_port`. Until those fields are real values, migrate refuses with an unresolved-input error naming the binding and field.
+
+### SAM and Serverless Framework
+
+| Source | Result |
+| --- | --- |
+| SAM `AWS::Serverless::Function` `Handler` | Service `worker_bundle_path` |
+| SAM / Serverless environment variables | `[services.vars]` |
+| Scoped SQS ARNs / queue names | `type = "queue"` |
+| Scoped S3 ARNs / bucket names | `type = "r2"` placeholder that still needs endpoint and credential scope from the operator |
+
+Lambda formats do not carry a Peren `compatibility_date`. Pass `--compatibility-date`. Named managed IAM policies, wildcard `Resource: "*"`, DynamoDB, and unrecognized AWS services are refused. Triggers and events become unmapped-trigger notices. `Runtime`, `MemorySize`, `Timeout`, and `provider.runtime` become field-not-translated notices.
+
+## What is refused
+
+- Wrangler `send_email`, `browser`, and `images` directives.
+- Unsupported compatibility flags. `nodejs_compat` and `nodejs_compat_v2` are accepted with a partial-support notice, not as Cloudflare's full Node surface.
+- YAML anchors and aliases.
+- Sources larger than 4 MiB.
+- Unresolved `OPERATOR-INPUT-REQUIRED` placeholders on bindings that need operator fields.
+
+Fields such as `routes`, `env.<name>`, `build.*`, `workers_dev`, `account_id`, `placement`, `limits`, `logpush`, and `migrations` are ignored with notices. They are not rewritten into fleet topology.
+
+## After import
+
+1. Read every notice. Replace operator-required fields before the fragment can deploy.
+2. Confirm the Worker still uses `export default` and `fetch(request, env, ctx)`.
+3. Declare outbound hosts and secrets explicitly. There is no ambient network.
+4. Run the service under `peren dev`, then validate the merged fleet file.
+
+## Related
+
+- [Migrate from Cloudflare Workers](/docs/deployment/cloudflare/)
+- [Compatibility and provider requirements](/docs/deployment/compatibility/)
+- [Fleet configuration](/docs/deployment/config/)

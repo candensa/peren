@@ -1,0 +1,42 @@
+---
+title: "Error reference"
+description: "Errors operators and Workers see, grouped by surface, with the next action."
+---
+
+This page lists errors you see at the CLI, in config validation, or from a Worker, and the next action for each.
+
+## CLI and process start
+
+| What you see | Cause | Next action |
+| --- | --- | --- |
+| `error: …` on stderr, exit `1` | The command failed after it accepted the arguments | Read the message. Fix config, credentials, paths, or fleet state, then retry. |
+| Usage text on stderr, exit `2` | Invalid invocation | Fix flags and arguments. See [Exit codes](/docs/reference/exit-codes/). |
+| `d1 restore requires D1 time-travel snapshots and bookmarks, which are not available in the current native storage model` | `peren d1 restore` | Do not rely on D1 time travel. Restore from your own backups. See [Unsupported behavior](/docs/deployment/unsupported/). |
+| `required environment variable "NAME" is not set` | A binding or provider names an environment variable that is missing before listeners open | Export the named variable in the process environment, then start again. |
+| Config validation problems naming `otlp` or `logpush` | Those tables are present in the fleet file | Remove the tables. Use `/metrics`, `peren logs`, and `peren tail`. See [Observability](/docs/operations/observability/). |
+| Compatibility flag unavailable or unknown during provider build | `compatibility_flags` failed runtime resolution | Clear unsupported flags. See [Compatibility dates and flags](/docs/deployment/compatibility-dates/). |
+
+## Worker host and bindings
+
+| What you see | Cause | Next action |
+| --- | --- | --- |
+| `runtime host operation failed` | A node operation failed: network, signing, or storage | Check the binding, credentials, allowed hosts, and the upstream. Retry after that dependency answers. |
+| `TypeError: outbound host … is not allowed by this binding` | `env.NAME.fetch` targeted a host outside `allowed_hosts` | Add the host to the outbound binding or call a permitted host. Redirect targets are not re-checked. See [Outbound fetch](/docs/bindings/outbound/). |
+| `KV compareAndSet is only supported by native KV` | `compareAndSet` on Redis or bucket KV | Use native KV for conditional writes, or use `put` when a conditional write is not required. See [KV](/docs/bindings/kv/). |
+| `TypeError: fetch must return a Response` | The Worker `fetch` handler returned a non-`Response` value | Return a `Response` or a promise that resolves to one. See [Workers](/docs/build/workers/). |
+| `TypeError: Container.<operation> requires a managed sandbox provider; this binding currently supports fetch() through the configured local port` | Container `exec`, `start`, `stop`, `destroy`, `readFile`, `writeFile`, or related control methods | Use `fetch` against the local port only. See [Containers](/docs/bindings/containers/). |
+| `binding "NAME" does not use an operator-supported D1 backend` | Operator D1 command or query against an external D1 backend | Switch the binding to `native_sqlite` or `turso`. See [D1](/docs/bindings/d1/). |
+
+## HTTP admission and readiness
+
+| What you see | Cause | Next action |
+| --- | --- | --- |
+| HTTP `503` on new work after peer drain | Peer listener received `POST /control/v1/node/drain` | Expected while draining. Finish in-flight work, then remove or replace the node. See [Drain a node](/docs/operate/drain/). |
+| `/readyz` returns `503` | Listener readiness is false | Inspect peer control status and admission. Do not send traffic to that listener. |
+
+## Related
+
+- [Exit codes](/docs/reference/exit-codes/)
+- [Unsupported and refused behavior](/docs/deployment/unsupported/)
+- [CLI reference](/docs/reference/cli/)
+- [Limits](/docs/reference/limits/)

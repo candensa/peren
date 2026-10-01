@@ -1,0 +1,129 @@
+---
+title: "Quickstart"
+description: "Initialise a fleet file, run one local Worker, and verify the request path."
+---
+
+This how-to starts one local node, loads one Worker, and answers one HTTP request.
+
+<SystemDiagram name="dev-serve" />
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- An empty project directory
+
+## Initialise the fleet file
+
+```sh
+peren init
+```
+
+`peren init` writes only `fleet.toml` and prints:
+
+```text
+created fleet.toml
+```
+
+It does not create `worker.js`, `./certs`, or `./data`.
+
+The file looks like this, with a new `node_id` on each run:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "file"
+path = "./data"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf.pem"
+leaf_key_path = "./certs/leaf.key"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+## Create the Worker
+
+Create `worker.js` in the same directory:
+
+```js
+export default {
+  async fetch(request, env, ctx) {
+    return new Response("hello from Peren\n");
+  },
+};
+```
+
+Peren installs `export default` as the entry. HTTP calls `fetch(request, env, ctx)`. `ctx` exposes `waitUntil` only.
+
+## Create development certificates
+
+```sh
+peren devcert ./certs
+```
+
+`peren devcert` writes `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem` under `./certs`. Use these files only for local development.
+
+Edit `[mtls]` so the paths match the files on disk:
+
+```toml
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+```
+
+`[mtls]` holds peer identity material for the node. Inbound peer listeners are plain TCP. Keep the peer port off the public network.
+
+## Run the local node
+
+```sh
+peren dev fleet.toml
+```
+
+`peren dev` prints topology from the config, then remaps listeners to free loopback ports and forces a memory bucket for the session. Representative stdout:
+
+```text
+config: .
+service api worker=worker.js
+socket public service=api listen=127.0.0.1:8080
+public: http://127.0.0.1:54321
+```
+
+Call the `public:` URL. The port is the one this process bound, which is not necessarily `8080`. The other printed lines show the shape of the topology. Use `--json` when a script needs a stable shape.
+
+## Send a request
+
+```sh
+curl http://127.0.0.1:54321/
+```
+
+Replace the host and port with the `public:` line from your session. The response body is:
+
+```text
+hello from Peren
+```
+
+That response proves Peren loaded the Worker bundle, opened the public socket, and dispatched the request through an isolate.
+
+## Failure: missing Worker file
+
+If `worker.js` is missing, Peren refuses to start and reports that the Worker module could not be read. Create `worker.js`, then run `peren dev fleet.toml` again.
+
+## Stop
+
+Stop the process with Ctrl+C. `peren dev` exits after shutting down the local node.
+
+Next: [Build your first Durable Object](/docs/start/durable/).

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1012 400" role="img" aria-labelledby="title">
+<title id="title">peren dev replaces the bucket and the port.</title>
+<defs>
+  <marker id="dev-serve-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="dev-serve-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1012" height="400" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="24" width="284" height="352" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">PEREN DEV</text>
+<rect x="424" y="24" width="564" height="264" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="440" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">PEREN SERVE</text>
+<path d="M 256.0 108.0 L 356.0 108.0 L 356.0 184.0 L 456.0 184.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#dev-serve-end)"/>
+<path d="M 156.0 240.0 L 156.0 264.0 L 166.0 264.0 L 166.0 288.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#dev-serve-end)"/>
+<path d="M 256.0 212.0 L 356.0 212.0 L 356.0 184.0 L 456.0 184.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#dev-serve-end)"/>
+<path d="M 616.0 184.0 L 656.0 184.0 L 656.0 108.0 L 696.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#dev-serve-end)"/>
+<path d="M 616.0 184.0 L 656.0 184.0 L 656.0 228.0 L 696.0 228.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#dev-serve-end)"/>
+<rect x="56" y="80" width="200" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="156" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">memory bucket</text>
+<rect x="56" y="184" width="200" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="156" y="217.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">port 0</text>
+<rect x="56" y="288" width="220" height="56" rx="12" fill="#e7f2ee" stroke="#2f5d50" stroke-width="1.6"/>
+<text x="166" y="321.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">public: address line</text>
+<rect x="456" y="156" width="160" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="536" y="189.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">worker.js</text>
+<rect x="696" y="80" width="220" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="806" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">file bucket</text>
+<rect x="696" y="200" width="260" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="826" y="233.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">listen address in file</text>
+</svg>

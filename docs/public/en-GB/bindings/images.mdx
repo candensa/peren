@@ -1,0 +1,104 @@
+---
+title: "Images"
+description: "Transform or pass through image sources through an images binding."
+---
+
+An images binding exposes `input().transform().output()` on `env`. Use the local provider when you need a passthrough Response for development. Use the HTTP provider when an external transform service should receive the source and transform options.
+
+`type` is `images`. Omit `provider` or set `provider = { kind = "local" }` for local passthrough. For HTTP, set `provider = { kind = "http", url = "...", token_env = "..." }`. `url` must not be empty. When `token_env` is set, that environment variable must be present before listeners open. The Worker cannot read the token; Peren attaches `Authorization: Bearer …` on the outbound transform request.
+
+## Chain
+
+`input(source)` returns an object with `transform(options?)` and `output()`. `transform` merges options into the request and returns the same object. `output` returns a `Response`.
+
+Local provider: `output` returns the source string, or `JSON.stringify(source)` for non-strings, as `application/octet-stream`. Transform options are not applied locally.
+
+HTTP provider: `output` `POST`s JSON `{ source, transforms }` to `{url}/transform` and returns that upstream Response.
+
+## Configure local
+
+Create `fleet.toml` and `worker.js`.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.IMAGES]
+type = "images"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+```js
+export default {
+  async fetch(_request, env) {
+    const output = await env.IMAGES.input("avatar").transform({ width: 64 }).output();
+    return new Response(await output.arrayBuffer(), {
+      headers: {
+        "content-type": output.headers.get("content-type") ?? "application/octet-stream",
+        "x-provider": env.IMAGES.provider.kind,
+      },
+    });
+  },
+};
+```
+
+## Run and verify
+
+```sh
+peren devcert ./certs
+peren dev fleet.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port. `peren serve` keeps the listen addresses and bucket kind from the file.
+
+```sh
+curl -D - http://127.0.0.1:54321/
+```
+
+Expected headers include `x-provider: local`. The body is the passthrough source `avatar`.
+
+## HTTP provider
+
+This fragment belongs inside the service. Export `IMAGES_TOKEN` before starting the node when `token_env` is set.
+
+```toml
+[services.bindings.IMAGES]
+type = "images"
+provider = { kind = "http", url = "https://images.internal", token_env = "IMAGES_TOKEN" }
+```
+
+`env.IMAGES.provider.kind` is `http`. `env.IMAGES.provider.endpoint` is the configured URL. `authorization` is not exposed on the provider object in the Worker.
+
+## Failure
+
+If `provider.url` is empty, Peren refuses the fleet file with:
+
+```text
+must not be empty
+```
+
+Set a non-empty HTTP URL, then start the node again. If `token_env` names a missing environment variable, Peren refuses to open listeners until that variable is set in the process environment.
+
+## Related
+
+- [Bindings overview](/docs/bindings/overview/)
+- [Outbound fetch](/docs/bindings/outbound/)

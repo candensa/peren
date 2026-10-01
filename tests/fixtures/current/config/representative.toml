@@ -1,0 +1,70 @@
+seed_peers = ["10.0.4.13:7500", "10.0.4.14:7500"]
+
+[node]
+node_id = "b3b6b7f0-2c1a-4e9f-9b1a-0c0f1a2b3c4d"
+advertise_addr = "10.0.4.12:7500"
+listen = "0.0.0.0:7500"
+
+[bucket]
+endpoint = "https://object-store.internal:8333"
+bucket = "peren-fleet"
+region = "us-east-1"
+access_key_env = "PEREN_BUCKET_ACCESS_KEY"
+secret_key_env = "PEREN_BUCKET_SECRET_KEY"
+
+[mtls]
+ca_cert_path = "/etc/peren/ca.pem"
+leaf_cert_path = "/etc/peren/leaf.pem"
+leaf_key_path = "/etc/peren/leaf.key"
+
+[routing]
+ownership_cache_ttl_secs = 45
+max_forward_retries = 4
+gossip_fanout = 3
+
+[queues]
+broker = "memory"
+
+[secrets_store]
+DB_PASSWORD = "SECRETS_STORE_DB_PASSWORD_ENV"
+
+[[services]]
+name = "chat-room"
+worker_bundle_path = "bundles/chat-room.js"
+compatibility_date = "2026-06-15"
+consumes_queues = ["outbound-notifications"]
+
+[services.entrypoint]
+kind = "durable_object"
+class_name = "Room"
+unique_key = "chat-app-v1"
+
+[services.entrypoint.id_from]
+source = "first_path_segment"
+
+[[services.cron_triggers]]
+expression = "0 */5 * * * *"
+
+[services.vars]
+ENVIRONMENT = "production"
+
+[services.secrets]
+API_KEY = "CHAT_ROOM_API_KEY"
+
+[services.secrets_store_refs]
+DB_PASSWORD = "DB_PASSWORD"
+
+[[services]]
+name = "api"
+worker_bundle_path = "bundles/api.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "0.0.0.0:8080"
+service = "chat-room"
+
+[[sockets]]
+name = "internal-api"
+listen = "0.0.0.0:8081"
+service = "api"

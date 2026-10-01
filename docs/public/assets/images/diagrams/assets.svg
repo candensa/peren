@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 360" role="img" aria-labelledby="title">
+<title id="title">Static files are served before the Worker.</title>
+<defs>
+  <marker id="assets-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="assets-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1180" height="360" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="24" width="1132" height="312" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">REQUEST PATH</text>
+<path d="M 216.0 164.0 L 266.0 164.0 L 266.0 108.0 L 316.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#assets-end)"/>
+<path d="M 576.0 108.0 L 626.0 108.0 L 626.0 118.0 L 676.0 118.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#assets-end)"/>
+<path d="M 136.0 192.0 L 136.0 228.0 L 316.0 228.0 L 316.0 264.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#assets-end)"/>
+<path d="M 596.0 264.0 L 636.0 264.0 L 636.0 272.0 L 676.0 272.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#assets-end)"/>
+<path d="M 916.0 264.0 L 876.0 264.0 L 876.0 272.0 L 836.0 272.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#assets-end)"/>
+<rect x="56" y="136" width="160" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="136" y="169.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">request</text>
+<rect x="316" y="80" width="260" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="446" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">assets directory match</text>
+<rect x="676" y="80" width="240" height="76" rx="12" fill="#e7f2ee" stroke="#2f5d50" stroke-width="1.6"/>
+<text x="796" y="115.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">response</text>
+<text x="796" y="131.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">Worker not called</text>
+<rect x="316" y="236" width="280" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="456" y="269.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">miss or run_worker_first</text>
+<rect x="676" y="244" width="160" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="756" y="277.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">Worker</text>
+<rect x="916" y="224" width="208" height="80" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="1020" y="269.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">no env.ASSETS binding</text>
+</svg>

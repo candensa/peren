@@ -1,0 +1,32 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000122"
+advertise_addr = "127.0.0.1:7122"
+listen = "127.0.0.1:7122"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "vector"
+worker_bundle_path = "examples/javascript/vector/worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.VECTORS]
+type = "vectorize"
+endpoint = "articles"
+credential_scope = "vectors"
+
+[services.bindings.VECTORS.provider]
+kind = "http"
+url = "https://vectors.example"
+token_env = "VECTOR_API_TOKEN"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8122"
+service = "vector"

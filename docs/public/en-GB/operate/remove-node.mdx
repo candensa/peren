@@ -1,0 +1,65 @@
+---
+title: "Remove a node"
+description: "Mark a drained node removed in the local fleet registry without wiping disk or moving cells."
+---
+
+Update the local fleet registry so a node is recorded as `removed` after you have finished taking it out of service.
+
+`peren node remove` writes membership state under the data directory. It does not wipe disk. It does not move cells. It does not stop a running process.
+
+## Prerequisites
+
+- a validated fleet config path for the host that holds the registry;
+- the node UUID to remove;
+- a draining registry record for that node, unless you pass `--force`.
+
+Use the two drain paths in [Drain a node](/docs/operate/drain/) before removal when you need registry drain, live admission refusal, or both. This page does not repeat those procedures.
+
+## Procedure
+
+Required:
+
+- config path (positional);
+- `--node` — UUID of the membership record to remove.
+
+Optional:
+
+- `--force` — skip the draining precondition.
+
+Without `--force`, removal refuses unless the registry already records that node as draining.
+
+```sh
+peren node remove peren.toml --node 00000000-0000-0000-0000-000000000001
+```
+
+Representative output:
+
+```text
+node 00000000-0000-0000-0000-000000000001 removed
+```
+
+State change: updates `$PEREN_DATA_DIR/fleet/nodes.json` (or `./data/fleet/nodes.json`) to `removed`. Prior reason and peer address fields are preserved when present.
+
+<Warning>
+`--force` removes the draining precondition. Pass it only when the operator accepts that the registry will mark the node removed without a prior drain record. Disk contents and cell ownership are unchanged either way.
+</Warning>
+
+```sh
+peren node remove peren.toml --node 00000000-0000-0000-0000-000000000001 --force
+```
+
+## Verification
+
+```sh
+peren node health peren.toml
+```
+
+Confirm the removed node's process is stopped separately if it must no longer serve traffic. Registry removal does not prove disk wipe or cell relocation.
+
+## Failure
+
+| Result | Cause | Next action |
+| --- | --- | --- |
+| node must be drained before removal | no draining record and `--force` omitted | drain via [Drain a node](/docs/operate/drain/), then retry, or pass `--force` only when that precondition is intentionally skipped |
+
+Related: [Drain a node](/docs/operate/drain/), [Add a node](/docs/operate/add-node/), [Operations overview](/docs/operate/overview/).

@@ -1,0 +1,729 @@
+---
+title: "Configuration reference"
+description: "Fleet TOML fields, defaults, validation, and what each setting changes at startup or runtime."
+---
+
+Peren reads one fleet TOML file before listeners open. This page is the schema: every section, key, type, default, environment variable, validation rule, and when a restart is required. Validation runs at load. Missing required fields, invalid addresses, unsupported exporters, and credential combinations that fail validation refuse startup.
+
+There is no `[fleet]`, `[bindings]`, `[tls]`, `[providers]`, or `[storage]` table. Bindings live under `[services.bindings.NAME]` with `type = "..."`.
+
+Change a field in the file, then restart the process (or start a new node) for the new value to take effect. Deployment generations use `peren deploy` and `peren rollback`, not edits to this file alone.
+
+Validate with:
+
+```sh
+peren config validate fleet.toml
+```
+
+## Root fields
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `seed_peers` | array of strings | no | `[]` | peer advertise addresses | bucket validation; console backend selection | non-empty with `bucket.kind = "memory"` or `"file"` fails validation |
+| `peer_identity_token_ttl_secs` | u64 | no | unset | non-negative integer | accepted in config | type errors fail parse |
+
+## `[node]`
+
+Required table. Identifies this process and its peer listener.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `node.node_id` | UUID | yes | none | any UUID | node identity, startup probes | missing or non-UUID fails parse |
+| `node.advertise_addr` | socket address string | yes | none | `IP:port` | peer discovery address published for this node | not an IP socket address fails validation |
+| `node.listen` | socket address string | yes | none | `IP:port` | peer TCP listener bind | not an IP socket address fails validation |
+| `node.identity_key_path` | path | no | unset | filesystem path | path normalization in development | accepted; live peer path does not load it in this build |
+| `node.lease_mode` | enum | no | `continuous` | `continuous`, `lazy`, `shadow` | config parse | unknown enum fails parse |
+| `node.region` | string | no | unset | any string | config parse | accepted; placement effect is not applied from this field in this build |
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+```
+
+Changing `node_id` creates a different node identity. Changing `listen` or `advertise_addr` requires a restart.
+
+## `[bucket]`
+
+Required table. Fleet durable object store used for ownership and recovery records.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `bucket.kind` | enum | no | `s3` | `s3`, `memory`, `file`, `azure_blob` | object-store provider | `memory` or `file` with non-empty `seed_peers` fails validation |
+| `bucket.path` | path | for `file` | unset | directory path | file-backed store | missing when `kind = "file"` fails validation |
+| `bucket.endpoint` | URL string | for `s3` | unset | object-store endpoint | S3 client | missing when `kind = "s3"` fails validation |
+| `bucket.bucket` | string | for `s3` and `azure_blob` | unset | bucket or container name | S3 / Azure client | missing for those kinds fails validation |
+| `bucket.region` | string | no | `us-east-1` at S3 client build when unset | AWS-style region | S3 client | wrong region causes client or CAS probe failure at startup |
+| `bucket.access_key_env` | env var name | for `s3` when credentials are configured or environment | unset | name of env var holding access key | S3 static credentials | missing when required fails validation; missing env value fails before listeners open |
+| `bucket.secret_key_env` | env var name | same as `access_key_env` | unset | name of env var holding secret key | S3 static credentials | same as `access_key_env` |
+| `bucket.credentials_source` | enum | no | `configured` | `configured`, `environment`, `instance_role`, `workload_identity`, `eks_pod_identity` | S3 credential selection | `configured` / `environment` without key env names fails validation |
+| `bucket.allow_http` | bool | no | `false` | `true`, `false` | S3 client | `false` against an `http://` endpoint fails at client build or probe |
+| `bucket.azure_account_env` | env var name | for `azure_blob` | unset | account env var | Azure client | missing fails validation |
+| `bucket.azure_access_key_env` | env var name | for `azure_blob` | unset | access-key env var | Azure client | missing fails validation |
+| `bucket.azure_emulator` | bool | no | `false` | `true`, `false` | Azure client | wrong setting fails connectivity at startup probe |
+
+For `kind = "s3"`:
+
+- `configured` and `environment` read `access_key_env` and `secret_key_env` from the process environment and build a static-key S3 client.
+- `instance_role`, `workload_identity`, and `eks_pod_identity` call the bucket client's instance-role builder (`AmazonS3Builder` without static keys). That path uses the object-store default credential chain for the host.
+
+This bucket field is not the Worker AWS SigV4 binding. SigV4 `credential_source` values `instance_role`, `workload_identity`, and `eks_pod_identity` read `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` from the process environment and do not call IMDS. See [AWS SigV4](/docs/bindings/sigv4/).
+
+```toml
+[bucket]
+kind = "file"
+path = "./data"
+```
+
+```toml
+[bucket]
+kind = "s3"
+endpoint = "https://s3.example.com"
+bucket = "peren-fleet"
+region = "us-east-1"
+credentials_source = "configured"
+access_key_env = "PEREN_BUCKET_ACCESS_KEY"
+secret_key_env = "PEREN_BUCKET_SECRET_KEY"
+```
+
+## `[mtls]`
+
+Required table. Peer certificate paths for the node. Inbound peer listeners are plain TCP. The process does not terminate inbound TLS with these paths. Keep the peer port off the public network. Worker client certificates use binding `type = "mtls_certificate"`, not this table.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `mtls.ca_cert_path` | path | yes | none | filesystem path | required in config; path absolutized for local development | missing fails parse |
+| `mtls.leaf_cert_path` | path | yes | none | filesystem path | same | missing fails parse |
+| `mtls.leaf_key_path` | path | yes | none | filesystem path | same | missing fails parse |
+| `mtls.require_client_cert` | bool | no | `true` | `true`, `false` | config parse | accepted; inbound peer TLS is not terminated from this table in this build |
+
+```toml
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+```
+
+`peren devcert ./certs` writes `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`. `peren init` writes `leaf.pem` and `leaf.key` into `[mtls]`. After `peren devcert`, edit those two paths so they name the files on disk. Use this command only for local development.
+
+## `[routing]`
+
+Optional table. Defaults apply when omitted.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `routing.ownership_cache_ttl_secs` | u64 | no | `45` | non-negative integer | accepted in config | type errors fail parse |
+| `routing.max_forward_retries` | u32 | no | `4` | non-negative integer | accepted in config | type errors fail parse |
+| `routing.gossip_fanout` | usize | no | `3` | non-negative integer | accepted in config | type errors fail parse |
+
+This build stores these fields. Live forwarding and gossip paths do not read them in the current node process.
+
+## `[limits]`
+
+Optional table. Defaults apply when omitted. Restart required to change.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `limits.max_request_body_bytes` | u64 | no | `33554432` (32 MiB) | positive size | HTTP body admission | oversized bodies are refused on the request path |
+| `limits.max_heap_bytes` | u64 | no | `134217728` (128 MiB) | at least 16 MiB | isolate heap limit | below 16 MiB fails validation |
+| `limits.max_execution_time_ms` | u64 | no | `30000` | greater than zero | isolate wall-clock limit | `0` fails validation |
+| `limits.max_subrequests_per_invocation` | u32 | no | `10000` | non-negative integer | subrequest budget per invocation | excess subrequests fail the invocation |
+| `limits.max_isolates` | usize | no | `256` | greater than zero | isolate admission | `0` fails validation; saturation refuses new work |
+| `limits.isolate_fair_share_percent` | u8 | no | `25` | `1`–`100` | validation only in this build | outside range fails validation |
+| `limits.checkpoint_threshold_bytes` | u64 | no | `4194304` (4 MiB) | non-negative integer | accepted in config | type errors fail parse |
+| `limits.max_cpu_time_ms` | u64 | no | `30000` | non-negative integer | stored in config | not applied on the live HTTP path in this build |
+| `limits.cron_retry_base_ms` | u64 | no | `2000` | greater than zero when cron retries are enabled | validation | `0` with `cron_retry_max_attempts > 0` fails validation |
+| `limits.cron_retry_max_attempts` | u32 | no | `6` | non-negative integer | accepted in config | type errors fail parse |
+| `limits.cron_retry_max_backoff_ms` | u64 | no | `64000` | non-negative integer | accepted in config | type errors fail parse |
+| `limits.max_steps_per_instance` | u64 | no | `100000` | non-negative integer | accepted in config | type errors fail parse |
+
+```toml
+[limits]
+max_request_body_bytes = 33554432
+max_heap_bytes = 134217728
+max_execution_time_ms = 30000
+max_subrequests_per_invocation = 10000
+max_isolates = 256
+```
+
+## `[logging]`
+
+Optional table. Level strings are validated at config load.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `logging.internal_level` | string | no | `trace` | `trace`, `debug`, `info`, `warn`, `error` | validation | other strings fail validation |
+| `logging.worker_console_level` | string | no | `trace` | same | validation | other strings fail validation |
+| `logging.trace_ownership_hot_path` | bool | no | `false` | `true`, `false` | accepted in config | type errors fail parse |
+
+`/healthz`, `/readyz`, `/metrics`, `peren logs`, and `peren tail` work without this table. `peren logs` and `peren tail` require `--service`.
+
+## `[shutdown]`
+
+Optional table.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `shutdown.evacuation_deadline_secs` | u64 | no | `40` | non-negative integer | process shutdown deadline | too low can cut shutdown short before listeners finish |
+| `shutdown.evacuation_concurrency` | usize | no | `8` | non-negative integer | accepted in config | type errors fail parse |
+
+## `[rebalance]`
+
+Optional table.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `rebalance.interval_secs` | u64 | no | `5` | non-negative integer | accepted in config | type errors fail parse |
+| `rebalance.placement_weight` | u32 | no | unset | non-negative integer | accepted in config | type errors fail parse |
+
+This build stores these fields. The live placement path does not read them in the current node process.
+
+## `[queues]`
+
+Optional table. When omitted, the process uses an in-memory broker.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `queues.broker` | enum | no | `memory` | `memory`, `file`, `cell`, `nats`, `rabbitmq`, `kafka` | queue broker | broker without its connection field fails validation or startup |
+| `queues.file_path` | string | for `file` | unset | filesystem path | file broker | missing fails validation |
+| `queues.cell_path` | string | no | `{data}/queues/cell.sqlite` when unset | filesystem path | cell broker | invalid path fails broker open |
+| `queues.nats_url` | string | for `nats` | unset | NATS URL | NATS broker | missing fails validation |
+| `queues.amqp_url` | string | for `rabbitmq` | unset | AMQP URL | RabbitMQ broker | missing fails validation |
+| `queues.kafka_bootstrap_servers` | string | for `kafka` | unset | bootstrap server list | Kafka broker | missing fails validation |
+
+### `[queues.consumer_defaults]`
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `queues.consumer_defaults.max_batch_size` | u16 | no | `10` | `1`–`100` | queue consumers | outside range fails validation |
+| `queues.consumer_defaults.max_batch_timeout_secs` | u64 | no | `5` | `1`–`60` | queue consumers | outside range fails validation |
+| `queues.consumer_defaults.max_retries` | u16 | no | `3` | at most `100` | queue consumers | above `100` fails validation |
+| `queues.consumer_defaults.max_concurrency` | u16 | no | `1` | `1`–`250` | queue consumers | outside range fails validation |
+| `queues.consumer_defaults.dead_letter_queue` | string | no | unset | queue name | queue consumers | type errors fail parse |
+| `queues.consumer_defaults.retry_delay_secs` | u64 | no | `0` | at most `86400` | queue consumers | above `86400` fails validation |
+
+```toml
+[queues]
+broker = "memory"
+
+[queues.consumer_defaults]
+max_batch_size = 10
+max_batch_timeout_secs = 5
+max_retries = 3
+max_concurrency = 1
+```
+
+## `[cache]`
+
+Optional table. Default is in-memory. Backs the global `caches` object. It is not an `env` binding.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cache.kind` | enum tag | no | `memory` | `memory`, `kv`, `redis`, `bucket` | cache provider | unknown kind fails parse |
+| `cache.namespace` | string | for `kv` | none | non-empty string | native KV-backed cache | empty fails validation |
+| `cache.url_env` | env var name | for `redis` | none | Redis URL env var | Redis cache | missing env fails before listeners open |
+| `cache.endpoint` | string | for `bucket` | none | S3-compatible endpoint | bucket cache | missing fails validation |
+| `cache.bucket` | string | for `bucket` | none | bucket name | bucket cache | missing fails validation |
+| `cache.prefix` | string | no | `""` | object key prefix | bucket cache | type errors fail parse |
+| `cache.access_key_id_env` | env var name | for `bucket` | none | access key env var | bucket cache | missing fails validation |
+| `cache.secret_access_key_env` | env var name | for `bucket` | none | secret key env var | bucket cache | missing fails validation |
+| `cache.allow_http` | bool | no | `false` | `true`, `false` | bucket cache | HTTP endpoint with `false` fails client use |
+
+```toml
+[cache]
+kind = "memory"
+```
+
+## `[secrets]`
+
+Optional table. Controls how `peren secrets` and store-backed secret resolution select a backend. Default provider is `local`. Non-local providers parse and validate, then refuse at secret-command runtime with an unsupported-provider error in this build.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `secrets.provider` | enum | no | `local` | `local`, `aws_secrets_manager`, `gcp_secret_manager`, `azure_key_vault`, `vault` | secrets backend | non-local refuses at rotate/list/get in this build |
+| `secrets.region` | string | for AWS | unset | region string | validation for AWS | missing when provider is AWS fails validation |
+| `secrets.project` | string | for GCP | unset | project id | validation for GCP | missing when provider is GCP fails validation |
+| `secrets.vault_url` | string | for Azure Key Vault or Vault | unset | URL | validation | missing for those providers fails validation |
+| `secrets.credentials_source` | enum | no | `configured` | same enum as bucket | validation for external managers | `configured` or `environment` with an external manager fails validation |
+| `secrets.prefix` | string | no | unset | prefix string | accepted in config | type errors fail parse |
+
+### `[secrets_store]`
+
+Optional map of store secret name to environment variable name. Values are env var names, not secret material.
+
+```toml
+[secrets_store]
+DB_PASSWORD = "SECRETS_STORE_DB_PASSWORD_ENV"
+```
+
+Unknown names referenced from `services.secrets_store_refs` fail validation. Missing environment values fail before listeners open.
+
+## Refused telemetry tables
+
+These tables parse into the config model. Validation refuses them in this build:
+
+| Path | Validation message |
+| --- | --- |
+| `[otlp]` | OTLP export is not implemented in this build |
+| `[logpush]` | Logpush export is not implemented in this build |
+
+Remove the table to pass validation.
+
+## `[d1_time_travel]`
+
+Optional table. Default `retention_days` is `30`.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `d1_time_travel.retention_days` | u64 | no | `30` | non-negative integer | accepted in config | type errors fail parse |
+
+`peren d1 restore` refuses. Native D1 has no time-travel snapshots or bookmarks in this build. `peren d1 prune-history` accepts `--retention-days` and does not use it.
+
+## `[[services]]`
+
+At least one service is required. Each entry is one Worker bundle and its bindings.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `services[].name` | string | yes | none | 1–63 ASCII letters, digits, `-`, `_` | sockets, bindings, admission | invalid or duplicate name fails validation |
+| `services[].worker_bundle_path` | path | yes | none | path to `.js`, `.cjs`, or `.wasm` | isolate loader | missing file fails at startup |
+| `services[].compatibility_date` | date string | yes | none | `YYYY-MM-DD` | compatibility resolution | invalid date fails validation |
+| `services[].compatibility_flags` | array of strings | no | `[]` | flag names | compatibility resolution | unknown combinations follow compatibility resolution rules |
+| `services[].vars` | string map | no | empty | string values | `env` plain variables | type errors fail parse |
+| `services[].secrets` | map of secret declarations | no | empty | env var name string, or `{ source = "env" \| "store", name = "..." }` | `env` secret strings | missing secret material fails before listeners open |
+| `services[].secrets_store_refs` | string map | no | empty | keys into `[secrets_store]` | secrets | unknown store name fails validation |
+| `services[].consumes_queues` | array | no | `[]` | queue name string, or `{ queue = "...", ...overrides }` | queue consumers | invalid overrides fail validation |
+| `services[].cron_triggers` | array of `{ expression }` | no | `[]` | valid cron expressions | cron scheduler | invalid expression fails validation |
+| `services[].tail_consumers` | array of `{ service }` | no | `[]` | existing service names | tail routing | unknown service fails validation |
+| `services[].additional_modules` | path map | no | empty | module specifier to path | module loader | listing the entry module here fails validation |
+| `services[].source_maps` | path map | no | empty | paths | diagnostics | type errors fail parse |
+| `services[].assets` | table | no | unset | see assets | static file serving before Worker | more than 100 `run_worker_first` patterns fails validation |
+| `services[].tenant_id` | string | no | unset | id in `[[tenants]]` | tenancy validation | unknown tenant fails validation |
+| `services[].project_id` | string | no | unset | id in `[[projects]]` | tenancy validation | unknown project or tenant mismatch fails validation |
+| `services[].placement_regions` | array of strings | no | `[]` | region labels | accepted in config | type errors fail parse |
+| `services[].max_heap_bytes` | u64 | no | fleet limit | at least 16 MiB | per-service override validation | below 16 MiB fails validation |
+| `services[].max_execution_time_ms` | u64 | no | fleet limit | greater than zero | per-service override validation | `0` fails validation |
+| `services[].max_cpu_time_ms` | u64 | no | unset | non-negative integer | stored | not applied on the live HTTP path |
+| `services[].max_subrequests_per_invocation` | u32 | no | fleet limit | non-negative integer | accepted | type errors fail parse |
+| `services[].isolate_fair_share_percent` | u8 | no | unset | `1`–`100` | validation | outside range fails validation |
+| `services[].checkpoint_threshold_bytes` | u64 | no | unset | non-negative integer | accepted | type errors fail parse |
+| `services[].workflow_retention_days` | u64 | no | unset | non-negative integer | accepted | type errors fail parse |
+| `services[].deploy_max_resident_age_secs` | u64 | no | unset | non-negative integer | accepted | type errors fail parse |
+| `services[].max_steps_per_instance` | u64 | no | unset | non-negative integer | accepted | type errors fail parse |
+
+### `[services.entrypoint]`
+
+Default `kind = "stateless"`. For a Durable Object entrypoint:
+
+```toml
+[services.entrypoint]
+kind = "durable_object"
+class_name = "Counter"
+unique_key = "counter-v1"
+
+[services.entrypoint.id_from]
+source = "first_path_segment"
+```
+
+Or `source = "header"` with `name = "..."`.
+
+### `[services.assets]`
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `services[].assets.directory` | path | yes when assets set | none | directory path | static serving | missing directory fails at use |
+| `services[].assets.run_worker_first` | bool or string array | no | unset | bool, or at most 100 patterns | request routing | more than 100 patterns fails validation |
+
+An `assets` binding requires this table.
+
+### `[services.bindings.NAME]`
+
+Bindings use `type`. Parent table is the current `[[services]]` entry.
+
+#### `type = "kv"`
+
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `namespace` | string | yes | none |
+| `unique_key` | string | yes | none |
+| `backend` | tagged table | no | `kind = "native"` |
+
+Backend kinds: `native`; `redis` with `url_env`; `bucket` with `endpoint`, `bucket`, `access_key_id_env`, `secret_access_key_env`, optional `prefix`, `allow_http`.
+
+#### `type = "d1_database"`
+
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `database_name` | string | yes | none |
+| `unique_key` | string | yes | none |
+| `backend` | tagged table | no | `kind = "native_sqlite"` |
+
+Backend kinds: `native_sqlite`; `turso` with `url_env`, `token_env`, optional `replica_path`; `external` with `url_env` and `driver` (`postgres`, `mysql`, `sqlite`) — external backends are refused at query time.
+
+#### `type = "r2_bucket"`
+
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `endpoint` | string | yes | none |
+| `bucket` | string | yes | none |
+| `credential_scope` | string | yes | none |
+| `region` | string | no | unset |
+| `access_key_env` | env var name | no | unset |
+| `secret_key_env` | env var name | no | unset |
+| `token_env` | env var name | no | unset |
+| `allow_http` | bool | no | `false` |
+| `prefix` | string | no | unset |
+| `notifications` | array | no | `[]` (at most 100) |
+
+Each notification needs `queue_name`, non-empty `event_types` (`object_create`, `object_delete`), optional `prefix` / `suffix`.
+
+#### `type = "queue"`
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `queue_name` | string | yes |
+
+#### `type = "service"`
+
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `entrypoint` | string | yes | none (must name an existing service) |
+| `props` | JSON | no | null |
+| `class_name` | string | no | unset |
+
+#### `type = "durable_object_namespace"`
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `class_name` | string | yes |
+| `unique_key` | string | yes |
+
+#### `type = "outbound"`
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `allowed_hosts` | string array | yes |
+
+Worker calls `env.NAME.fetch`. A host outside the list throws `TypeError`. Redirect targets are not checked again.
+
+#### `type = "aws_sigv4"`
+
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `credential_source` | enum | yes | none |
+| `region` | string | yes | non-empty |
+| `service` | string | yes | non-empty |
+| `allowed_hosts` | string array | yes | at least one host |
+| `access_key_env` | env var name | for `configured` / `environment` | unset |
+| `secret_key_env` | env var name | for `configured` / `environment` | unset |
+| `token_env` | env var name | no | unset |
+
+`configured` and `environment` use the named env vars. `instance_role`, `workload_identity`, and `eks_pod_identity` read `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` at request time. They do not call IMDS. See [AWS SigV4](/docs/bindings/sigv4/).
+
+#### `type = "mtls_certificate"`
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `cert_pem_env` | env var name | yes |
+| `key_pem_env` | env var name | yes |
+
+Missing PEM env vars fail before listeners open. The object has no `fetch` method. Pass it as `fetch(url, { cf: { mtlsCertificate: env.NAME } })`.
+
+#### `type = "rate_limiter"`
+
+| Field | Type | Required | Constraint |
+| --- | --- | --- | --- |
+| `limit` | u32 | yes | greater than zero |
+| `period_secs` | u32 | yes | greater than zero |
+
+Counters are process-local.
+
+#### `type = "workflow"`
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `class_name` | string | yes |
+| `unique_key` | string | yes |
+
+#### `type = "secrets_store_secret"`
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `secret_name` | string | yes |
+
+Resolves to a string on `env`. Missing material fails before listeners open.
+
+#### `type = "ai"`
+
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `endpoint` | string | yes | none |
+| `credential_scope` | string | yes | none |
+| `provider` | tagged table | no | `kind = "http"` |
+
+Provider kinds: `http`; `openai` (`api_key_env`, optional `base_url`); `anthropic` (`api_key_env`, optional `base_url`, `version`); `gemini` (`api_key_env`, optional `base_url`); `workers_ai` (`account_id_env`, `api_token_env`); `local` (`command`). Empty required strings fail validation.
+
+#### `type = "vectorize"`
+
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `endpoint` | string | yes | none |
+| `credential_scope` | string | yes | none |
+| `provider` | tagged table | no | `kind = "local"` |
+
+Provider kinds: `local`; `http` (`url`, optional `token_env`); `qdrant` (`url`, `collection`, optional `api_key_env`); `pinecone` (`url`, `index`, `api_key_env`, optional `namespace`); `weaviate` (`url`, `class_name`, optional `api_key_env`).
+
+#### `type = "hyperdrive"`
+
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `pgcat_endpoint` | string | yes | none |
+| `credential_scope` | string | yes | none |
+| `caching_disabled` | bool | no | `false` |
+| `max_age_secs` | u64 | no | `60` |
+| `stale_while_revalidate_secs` | u64 | no | `15` |
+| `pool_max_connections` | u32 | no | `10` (must be greater than zero) |
+
+#### `type = "analytics_engine"`
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `dataset` | string | yes |
+| `credential_scope` | string | yes |
+
+#### `type = "container"`
+
+Requires a top-level `[containers]` table. Fields: `image`, `default_port`, optional `env`, `memory_mb`, `cpu_millis`, `idle_sleep_secs` (default `300`), `allow_network_egress` (default `false`).
+
+#### `type = "dispatcher"`
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `namespace` | string | yes |
+
+Must name a configured `[[dispatch_namespaces]]` entry.
+
+#### `type = "assets"`
+
+No extra fields. Requires `services[].assets`.
+
+#### `type = "images"`
+
+| Field | Type | Required | Default |
+| --- | --- | --- | --- |
+| `provider` | tagged table | no | `kind = "local"` |
+
+Provider kinds: `local`; `http` with `url` and optional `token_env`.
+
+#### `type = "loader"`
+
+No extra fields.
+
+```toml
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.vars]
+ENVIRONMENT = "development"
+
+[services.secrets]
+API_KEY = "API_KEY"
+
+[services.bindings.KV]
+type = "kv"
+namespace = "demo"
+unique_key = "demo"
+```
+
+## `[console]`
+
+Optional table. Opens a console listener when present. Restart the process after you change it.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `console.listen` | socket address string | yes when the table is set | none | `IP:port` | console listener | not an IP socket address fails validation |
+| `console.data_dir` | path | yes when the table is set | none | directory path | console data | missing fails parse |
+| `console.backend` | enum | no | `sqlite` when `seed_peers` is empty, otherwise `bucket` | `sqlite`, `bucket` | console storage | unknown value fails parse |
+
+```toml
+[console]
+listen = "127.0.0.1:9102"
+data_dir = "data/console"
+backend = "sqlite"
+```
+
+## `[deploy]`
+
+Optional table. Restart the process after you change it.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `deploy.enable_preview` | bool | no | `true` | `true`, `false` | accepted in config | type errors fail parse |
+| `deploy.poll_interval_secs` | u64 | no | `300` | non-negative integer | accepted in config | type errors fail parse |
+| `deploy.max_resident_age_secs` | u64 | no | `30` | non-negative integer | accepted in config | type errors fail parse |
+
+`peren deploy` still records a digest and a percentage. The percentage does not split traffic, and the running process does not reload the bundle from that command.
+
+## `[workflow]`
+
+Optional table. Defaults apply when the table is omitted. Restart the process after you change it.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `workflow.retention_days` | u64 | no | `0` | non-negative integer | accepted in config | type errors fail parse |
+| `workflow.sweep_interval_secs` | u64 | no | `3600` | non-negative integer | accepted in config | type errors fail parse |
+| `workflow.wakeup_sweep_interval_secs` | u64 | no | `15` | non-negative integer | accepted in config | type errors fail parse |
+
+A workflow binding is `type = "workflow"` on a service, not this table.
+
+## `[tracing]`
+
+Optional table. Restart the process after you change it.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tracing.sampling_ratio` | number | no | `1.0` | `0` through `1` inclusive | validation | outside that range fails validation |
+
+## `[containers]`
+
+Optional table. A `type = "container"` binding requires this table. Restart the process after you change it.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `containers.docker_socket` | string | no | unset | socket path | container host | type errors fail parse |
+| `containers.max_instances_per_node` | usize | no | `32` | non-negative integer | container admission | type errors fail parse |
+
+## `[[tenants]]`
+
+Optional. Each entry names a tenant. Restart the process after you change the list. `peren tenant revoke` writes a registry under the data directory and does not stop a running isolate.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tenants[].id` | string | yes | none | unique id | tenant validation | duplicate id fails validation |
+| `tenants[].cell_quota` | u32 | yes | none | non-negative integer | tenant validation | missing fails parse |
+
+## `[[projects]]`
+
+Optional. Each project belongs to a declared tenant.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `projects[].id` | string | yes | none | unique id | tenant validation | duplicate id fails validation |
+| `projects[].tenant_id` | string | yes | none | id in `[[tenants]]` | tenant validation | unknown tenant fails validation |
+
+A service that sets `project_id` must set `tenant_id` to that project's tenant.
+
+## `[[dispatch_namespaces]]`
+
+Optional. A `type = "dispatcher"` binding must name one of these entries.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `dispatch_namespaces[].name` | string | yes | none | unique name | namespace validation | duplicate name fails validation |
+| `dispatch_namespaces[].scripts` | array | no | `[]` | script tables | namespace validation | duplicate script name fails validation |
+| `dispatch_namespaces[].scripts[].name` | string | yes | none | unique within the namespace | namespace validation | duplicate fails validation |
+| `dispatch_namespaces[].scripts[].worker_bundle_path` | path | yes | none | Worker bundle path | isolate loader | missing fails parse |
+| `dispatch_namespaces[].scripts[].compatibility_date` | date string | yes | none | `YYYY-MM-DD` | compatibility resolution | missing fails parse |
+| `dispatch_namespaces[].scripts[].compatibility_flags` | array of strings | no | `[]` | flag names | compatibility resolution | type errors fail parse |
+| `dispatch_namespaces[].scripts[].cell_quota` | u32 | yes | none | greater than zero | namespace validation | `0` fails validation |
+| `dispatch_namespaces[].scripts[].deployment.requested_unique_key` | string | no | `""` | string | accepted in config | type errors fail parse |
+| `dispatch_namespaces[].scripts[].deployment.kv_namespaces` | array of strings | no | `[]` | namespace names | accepted in config | type errors fail parse |
+| `dispatch_namespaces[].scripts[].deployment.d1_databases` | array of strings | no | `[]` | database names | accepted in config | type errors fail parse |
+| `dispatch_namespaces[].scripts[].deployment.r2_buckets` | array of tables | no | `[]` | `binding_name`, `endpoint`, `bucket`, `sub_path`, `credential_scope` | accepted in config | missing field fails parse |
+| `dispatch_namespaces[].scripts[].deployment.durable_object_classes` | array of strings | no | `[]` | class names | accepted in config | type errors fail parse |
+| `dispatch_namespaces[].scripts[].deployment.outbound_hosts` | array of strings | no | `[]` | host names | accepted in config | type errors fail parse |
+
+## `[[sockets]]`
+
+Public HTTP listeners. Names `peer` and `console` are reserved.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `sockets[].name` | string | yes | none | unique, not `peer` or `console` | listener registry | duplicate or reserved name fails validation |
+| `sockets[].listen` | socket address string | yes | none | `IP:port` | public listener bind | invalid address fails validation |
+| `sockets[].service` | string | yes | none | existing `services[].name` | request dispatch | unknown service fails validation |
+
+```toml
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+## Minimal complete local example
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "file"
+path = "./data"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+`peren init` writes this shape with a new `node_id`. It does not create `worker.js`, `./certs`, or `./data`.
+
+## Production-shaped example
+
+```toml
+[node]
+node_id = "b3b6b7f0-2c1a-4e9f-9b1a-0c0f1a2b3c4d"
+advertise_addr = "10.0.4.12:7000"
+listen = "0.0.0.0:7000"
+
+[bucket]
+kind = "s3"
+endpoint = "https://s3.example.com"
+bucket = "peren-fleet"
+region = "us-east-1"
+credentials_source = "configured"
+access_key_env = "PEREN_BUCKET_ACCESS_KEY"
+secret_key_env = "PEREN_BUCKET_SECRET_KEY"
+
+[mtls]
+ca_cert_path = "/etc/peren/ca.pem"
+leaf_cert_path = "/etc/peren/leaf.pem"
+leaf_key_path = "/etc/peren/leaf.key"
+
+[limits]
+max_request_body_bytes = 33554432
+max_heap_bytes = 134217728
+max_execution_time_ms = 30000
+max_subrequests_per_invocation = 10000
+max_isolates = 256
+
+[[services]]
+name = "api"
+worker_bundle_path = "/srv/peren/api/worker.js"
+compatibility_date = "2026-01-01"
+
+[services.secrets]
+API_KEY = "API_KEY"
+
+[[sockets]]
+name = "public"
+listen = "0.0.0.0:8080"
+service = "api"
+```
+
+Related: [Configure a fleet](/docs/deployment/config/), [Bindings overview](/docs/bindings/overview/), [AWS SigV4](/docs/bindings/sigv4/).

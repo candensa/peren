@@ -1,0 +1,47 @@
+---
+title: "Worker isolation"
+description: "Limits on a Worker isolate, and which calls leave the isolate through a binding."
+---
+
+Worker code runs inside a V8 isolate. It can reach the node only through bindings you configured. Signing keys and client certificate PEM stay in the node process.
+
+## Isolate and resource limits
+
+**What it covers:** the Worker isolate, its heap, and the wall-clock duration of one invocation.
+
+**What Peren does:** Worker execution inside a V8 isolate, with heap and wall-clock ceilings taken from fleet `[limits]` (and per-service overrides where configured). Defaults on the live HTTP path:
+
+| Field | Default |
+| --- | --- |
+| `max_request_body_bytes` | 32 MiB |
+| `max_heap_bytes` | 128 MiB |
+| `max_execution_time_ms` | 30000 |
+| `max_subrequests_per_invocation` | 10000 |
+| `max_isolates` | 256 |
+
+Crossing `max_heap_bytes` terminates the isolate. `max_execution_time_ms` ends a long invocation. `max_isolates` caps how many isolates the process admits at once.
+
+`max_cpu_time_ms` exists in config and defaults to 30000. Peren does not apply it to live HTTP requests. `max_execution_time_ms` is the limit that stops a long request.
+
+**What you configure:** which `[limits]` and per-service override values the fleet file declares, and that those values match the workload the node must serve.
+
+**What you can check:** a Worker that allocates past `max_heap_bytes` stops. A request longer than `max_execution_time_ms` stops. See [Limits](/docs/reference/limits/) and [Workers](/docs/build/workers/).
+
+## Host-mediated bindings
+
+**What it covers:** every host capability the Worker can call: storage, queues, outbound HTTP, SigV4, client mTLS, and other bindings.
+
+**What Peren does:** the node places bindings on `env` and performs the calls. The Worker receives those bindings and the secret strings you declared. It does not receive the process environment, the filesystem, or open network access.
+
+AWS SigV4 keys are read by the host from environment variables named in the binding. Client mTLS PEM is read by the host from `cert_pem_env` and `key_pem_env`. The Worker cannot read those keys or PEM values. SigV4 signing runs in the node process. The node attaches the mTLS identity when the Worker passes that binding into `fetch` for an allowed host.
+
+**What you configure:** which bindings appear on each service, which environment variables supply provider material, and which names are Worker-readable secrets.
+
+**What you can check:** the Worker can use the binding and cannot read the SigV4 keys or the mTLS PEM. See [Credentials and secrets](/docs/security/credentials/).
+
+## Related
+
+- [Security model](/docs/security/overview/)
+- [Network policy](/docs/security/network/)
+- [Workers](/docs/build/workers/)
+- [Limits](/docs/reference/limits/)

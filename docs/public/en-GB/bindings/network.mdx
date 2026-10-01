@@ -1,0 +1,18 @@
+---
+title: "Outbound network"
+description: "Choose among allowlisted outbound fetch, client mTLS, and host-owned AWS SigV4 signing."
+---
+
+A Worker cannot call the network until you configure a binding. Choose the binding for the call you need, then use it from the Worker. Peren checks the host and holds the credentials in the node process.
+
+<SystemDiagram name="network" />
+
+| Capability | Binding `type` | When to use it |
+| --- | --- | --- |
+| Allowlisted fetch | `outbound` | Call a specific HTTPS host without credentials or signing |
+| Client mTLS | `mtls_certificate` | Present a client certificate on an outbound request |
+| AWS SigV4 | `aws_sigv4` | Sign requests to an AWS service without exposing keys to Worker code |
+
+Use [Outbound fetch](/docs/bindings/outbound/) when the Worker only needs an allowlisted host. Use [Client mTLS](/docs/bindings/mtls/) when the upstream requires a client certificate. Use [AWS SigV4](/docs/bindings/sigv4/) when Peren must sign the request in the node process.
+
+Fleet `[mtls]` peer material is separate from the Worker client-certificate binding. See [Networking and ports](/docs/deploy/networking/).

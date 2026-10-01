@@ -1,0 +1,191 @@
+---
+title: "AI"
+description: "Call models through a host-owned AI binding without exposing provider API keys to Worker code."
+---
+
+An AI binding gives Worker code `run`, `embed`, `generateText`, and `chat` while Peren attaches provider credentials in the node process. The Worker receives response data. It does not receive the API key.
+
+## Prerequisites
+
+- A fleet file with `[node]`, `[bucket]`, `[mtls]`, one service, and one socket
+- For OpenAI, the process environment variable named by `api_key_env`
+- Development certificates from `peren devcert ./certs` when you run locally
+
+## Call OpenAI
+
+Write `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "ai"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.AI]
+type = "ai"
+endpoint = "https://api.openai.com/v1"
+credential_scope = "openai"
+
+[services.bindings.AI.provider]
+kind = "open_ai"
+api_key_env = "OPENAI_API_KEY"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "ai"
+```
+
+`type` must be `ai`. `endpoint` and `credential_scope` are required. `provider.kind` must be `open_ai`. `api_key_env` names the process environment variable that holds the OpenAI API key. Optional `base_url` defaults to `https://api.openai.com/v1`.
+
+Set `OPENAI_API_KEY` in the process environment, then write `worker.js`:
+
+```js
+export default {
+  async fetch(request, env) {
+    const result = await env.AI.generateText(
+      "gpt-4.1-mini",
+      "Describe Peren in one sentence.",
+      { maxTokens: 256 },
+    );
+
+    return Response.json({
+      provider: env.AI.provider.kind,
+      text: result.text,
+    });
+  },
+};
+```
+
+Run the node:
+
+```bash
+peren dev fleet.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```bash
+curl -s http://127.0.0.1:54321/
+```
+
+## Methods
+
+| Method | Arguments | Result |
+| --- | --- | --- |
+| `run(model, input, options)` | model id, provider request body, optional headers | provider JSON or text |
+| `embed(model, input, options)` | model id, text or object, optional options | `{ embeddings, raw }` |
+| `generateText(model, prompt, options)` | model id, prompt string or object, optional options | `{ text, raw }` |
+| `chat(model, messages, options)` | model id, message list, optional options | `{ text, raw }` |
+
+`env.AI.provider.kind` and `env.AI.provider.endpoint` expose provider metadata. The Worker cannot read the API key.
+
+## Success
+
+`generateText` returns `{ text, raw }` with the model text. `provider.kind` is `open_ai`.
+
+## Failure
+
+If `OPENAI_API_KEY` is missing from the process environment, the process fails before listeners open.
+
+If the effective endpoint string is empty, the binding throws `TypeError: AI endpoint is empty`.
+
+## Local command
+
+Use a local command when you want model calls without a remote provider:
+
+```toml
+[services.bindings.AI]
+type = "ai"
+endpoint = "local"
+credential_scope = "local"
+
+[services.bindings.AI.provider]
+kind = "local"
+command = "./local-model.sh"
+```
+
+`command` is required. Peren runs that command for `run`, `embed`, `generateText`, and `chat`. No `api_key_env` is required.
+
+## Anthropic
+
+```toml
+[services.bindings.AI]
+type = "ai"
+endpoint = "https://api.anthropic.com/v1"
+credential_scope = "anthropic"
+
+[services.bindings.AI.provider]
+kind = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+```
+
+Optional `base_url` defaults to `https://api.anthropic.com/v1`. Optional `version` defaults to `2023-06-01`. Missing `ANTHROPIC_API_KEY` fails the process before listeners open.
+
+## Gemini
+
+```toml
+[services.bindings.AI]
+type = "ai"
+endpoint = "https://generativelanguage.googleapis.com/v1beta"
+credential_scope = "gemini"
+
+[services.bindings.AI.provider]
+kind = "gemini"
+api_key_env = "GEMINI_API_KEY"
+```
+
+Optional `base_url` defaults to `https://generativelanguage.googleapis.com/v1beta`. Missing `GEMINI_API_KEY` fails the process before listeners open.
+
+## Workers AI
+
+```toml
+[services.bindings.AI]
+type = "ai"
+endpoint = "https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/run"
+credential_scope = "workers-ai"
+
+[services.bindings.AI.provider]
+kind = "workers_ai"
+account_id_env = "CLOUDFLARE_ACCOUNT_ID"
+api_token_env = "CLOUDFLARE_API_TOKEN"
+```
+
+Both environment variables are required. Missing either fails the process before listeners open. The Worker sees a redacted account segment in `provider.endpoint`.
+
+## HTTP provider
+
+When `provider` is omitted, or `kind = "http"`, Peren posts to `{endpoint}/run/{model}` with no host-attached API key:
+
+```toml
+[services.bindings.AI]
+type = "ai"
+endpoint = "https://models.example/v1"
+credential_scope = "models"
+```
+
+An empty `endpoint` throws `TypeError: AI endpoint is empty` at call time.
+
+## AWS Bedrock
+
+The AI binding has no Bedrock provider and does not sign AWS requests. Call Bedrock through an [AWS SigV4](/docs/bindings/sigv4/) binding. That binding signs in the node process from process environment credentials. It does not call IMDS.
+
+## Related
+
+- [Secrets](/docs/bindings/secrets/)
+- [Credentials and secrets](/docs/security/credentials/)
+- [AWS SigV4](/docs/bindings/sigv4/)
+- [Vector indexes](/docs/bindings/vector/)

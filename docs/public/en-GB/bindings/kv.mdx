@@ -1,0 +1,150 @@
+---
+title: "KV"
+description: "Configure a KV binding and call get, put, compareAndSet, delete, and list from a Worker."
+---
+
+KV gives a Worker a key-value namespace on `env`. Use it for small records, counters, and coordination values that do not need SQL. Prefer D1 when you need queries, and R2 when you store large objects.
+
+<SystemDiagram name="kv-providers" />
+
+## Configure native KV
+
+Create `peren.toml` and `worker.js` in your project. Native is the default backend when `backend` is omitted.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.KV]
+type = "kv"
+namespace = "demo"
+unique_key = "demo"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+```js
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const key = url.searchParams.get("key") ?? "message";
+    if (request.method === "PUT") {
+      const result = await env.KV.compareAndSet(
+        key,
+        { missing: true },
+        await request.text(),
+      );
+      if (!result.ok) {
+        return Response.json(result, { status: 409 });
+      }
+      return new Response(null, { status: 204 });
+    }
+    const value = await env.KV.get(key);
+    const record = await env.KV.getWithMetadata(key);
+    return Response.json({
+      provider: env.KV.provider.kind,
+      value: value ?? "",
+      version: record.version,
+    });
+  },
+};
+```
+
+## Run and verify
+
+```sh
+peren devcert ./certs
+peren dev peren.toml
+```
+
+Representative startup lines:
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```sh
+curl -X PUT "http://127.0.0.1:54321/?key=message" --data "hello"
+curl "http://127.0.0.1:54321/?key=message"
+```
+
+Expected JSON includes `"provider":"native"`, `"value":"hello"`, and a numeric `version`.
+
+## Methods
+
+| Method | Behavior |
+| --- | --- |
+| `get(key, options?)` | Returns the value, or `null`. `options.type` may be `text` (default), `json`, `arrayBuffer`, or `stream`. |
+| `getWithMetadata(key, options?)` | Returns `{ value, metadata, version }`. Missing keys return nulls for those fields. |
+| `put(key, value, options?)` | Stores the value. Options may include `metadata`, `expiration` (Unix seconds), and `expirationTtl` (seconds from now). |
+| `compareAndSet(key, expected, value, options?)` | Native only. Throws `Error("KV compareAndSet is only supported by native KV")` on Redis or bucket backends. `expected` is `{ missing: true }` or `{ version: n }`. Returns `{ ok, version }`. |
+| `delete(key)` | Removes the key. |
+| `list(options?)` | Returns `{ keys, cursor, list_complete }`. Options may include `prefix`, `cursor`, and `limit`. Each entry in `keys` has `name`. |
+
+## Redis backend
+
+This fragment belongs inside the same service that declares the Worker. Set `REDIS_URL` in the process environment before starting the node.
+
+```toml
+[services.bindings.KV]
+type = "kv"
+namespace = "demo"
+unique_key = "demo"
+backend = { kind = "redis", url_env = "REDIS_URL" }
+```
+
+If `REDIS_URL` is unset, Peren refuses to start with:
+
+```text
+required environment variable "REDIS_URL" is not set
+```
+
+`compareAndSet` throws on this backend. Use `put` when you do not need a conditional write.
+
+## Bucket backend
+
+This fragment belongs inside the service. Point `endpoint` at an S3-compatible store and export the named access keys.
+
+```toml
+[services.bindings.KV]
+type = "kv"
+namespace = "demo"
+unique_key = "demo"
+backend = { kind = "bucket", endpoint = "https://s3.example.com", bucket = "peren-kv", prefix = "kv/", access_key_id_env = "KV_ACCESS_KEY_ID", secret_access_key_env = "KV_SECRET_ACCESS_KEY" }
+```
+
+Missing access-key environment variables refuse process start the same way as Redis. `compareAndSet` throws on this backend.
+
+## One real failure
+
+Call `compareAndSet` against Redis or bucket KV:
+
+```js
+await env.KV.compareAndSet("message", { missing: true }, "hello");
+```
+
+The isolate throws:
+
+```text
+KV compareAndSet is only supported by native KV
+```
+
+Switch the binding to the native backend, or replace the call with `put` when a conditional write is not required.
+
+Related: [Provider selection](/docs/bindings/providers/), [Bindings overview](/docs/bindings/overview/), [D1](/docs/bindings/d1/).

@@ -1,0 +1,112 @@
+---
+title: "Operational runbooks"
+description: "Checks for common failures, what the output means, and what to do next."
+---
+
+Start from the symptom. Run the check. Use the output to decide the next step. These runbooks use installed `peren` commands and listener probes.
+
+## Node not listening
+
+**Symptom.** Clients or probes cannot reach a public or peer address.
+
+**Check.**
+
+```sh
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/healthz
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/readyz
+peren node health peren.toml
+```
+
+**What you should see.** `/healthz` returns 200 when the process is alive on that listener. `/readyz` returns 200 when the listener is ready for traffic, or 503 when readiness is false. Connection failure means nothing is accepting TCP on that address. `peren node health` probes the peer listen address and every configured public socket with `/readyz`.
+
+**Next action.** If `/healthz` fails to connect, start or restart the process and confirm listen addresses in the fleet file. If `/healthz` is 200 and `/readyz` is 503, the process is up but not ready—check live drain and readiness state on the peer control path. See [Networking](/docs/deploy/networking/) and [Drain a node](/docs/operate/drain/).
+
+## Storage check failure
+
+**Symptom.** Ownership, publish, or recovery against the configured bucket fails, or you need to refuse production use of an endpoint.
+
+**Check.**
+
+```sh
+peren conformance storage peren.toml
+```
+
+**What you should see.** Success prints storage probe fields including node, cell, epoch, revision, bytes, and range_read. Failure means the configured bucket did not satisfy the conformance probes (conditional write and ranged read among them).
+
+**Next action.** Fix the endpoint, credentials, and provider for the store named in the fleet file. Do not use that bucket for recovery until `peren conformance storage` succeeds. See [Degraded operation](/docs/operations/degraded/) and [Recovery after node loss](/docs/state/recovery/).
+
+## Deployment digest drift
+
+**Symptom.** Rollback refuses, deploy health looks wrong, or on-disk bundles no longer match recorded generations.
+
+**Check.**
+
+```sh
+peren deploy verify peren.toml --service api
+```
+
+**What you should see.** Success prints verified generations with active and percent fields. Failure means recorded digest, source map, or descriptor material drifted from files on disk for a checked generation.
+
+**Next action.** Restore the matching bundle files for the intended digest, or record a new generation after the on-disk artifacts are correct. `peren rollback` activates a recorded digest only when files already match. See [Deploy and roll back](/docs/deployment/deploy/).
+
+## Stale ownership (cell fenced)
+
+**Symptom.** Requests that need a cell fail after ownership verification or publication problems. Other cells on the same node may still work.
+
+**Check.** There is no `peren cell inspect` command. Send a request that addresses the cell, then check storage:
+
+```sh
+curl -sS http://127.0.0.1:8080/
+peren conformance storage peren.toml
+```
+
+**What you should see.** A refused cell request after an ownership failure means that cell is fenced. Peren will not run more mutable work on it. `peren conformance storage` shows whether the bucket still accepts the writes recovery needs. A ready listener does not mean the cell still has a valid owner.
+
+**Next action.** Restore storage health and ownership conditions before expecting new commits on that cell. Peren does not automatically migrate the cell to another node on this path. See [Degraded operation](/docs/operations/degraded/) and [Recovery after node loss](/docs/state/recovery/).
+
+## Queue commands against a memory queue
+
+**Symptom.** `peren queue depth`, `pause`, `resume`, `purge`, or `redrive` reports empty or unrelated state while a running node holds queue traffic.
+
+**Check.**
+
+```sh
+peren queue depth peren.toml --queue jobs
+```
+
+Confirm `[queues].broker` in the fleet file. When the broker is `memory`, or when `[queues]` is omitted, the CLI opens its own memory queue.
+
+**What you should see.** Queue commands from the CLI do not read the queue inside a node that is already running. A depth of zero from the CLI can still leave messages in that node.
+
+**Next action.** Use a file, cell, or external broker when operator commands must see shared queue state. See [Operate queues](/docs/operate/queues/).
+
+## Missing secret or PEM before listeners open
+
+**Symptom.** The process exits during start. No public or peer listener accepts connections.
+
+**Check.** Confirm every named environment variable for Worker secrets, secrets-store refs, provider credentials, and `mtls_certificate` `cert_pem_env` / `key_pem_env` is set in the process environment. Then retry start and probe:
+
+```sh
+curl -sS http://127.0.0.1:8080/healthz
+```
+
+**What you should see.** If a required secret or PEM variable is missing, Peren exits before it opens listeners, so `/healthz` does not answer. After you export the missing names, `/healthz` returning 200 means the listeners opened.
+
+**Next action.** Export the missing variables or restore store-backed secret values, then start again. See [Credentials and secrets](/docs/security/credentials/) and [Rotate secrets](/docs/operate/secrets/).
+
+## Restore refused or backup destination exists
+
+**Symptom.** `peren restore` or `peren backup` exits without copying.
+
+**Check.**
+
+```sh
+peren backup peren.toml --output ./backup-2026-03-01
+peren restore peren.toml --input ./backup-2026-03-01
+```
+
+**What you should see.** Backup refuses when the source data directory is absent or when `--output` already exists. Restore refuses when the data directory already exists and `--force` is omitted, or when `--input` is missing or not a directory.
+
+**Next action.** For backup, choose a new `--output` path or create the source data directory. For restore, stop writers, pass `--force` only when replacing the existing data directory is intended, and verify with `peren status` or a request afterward. See [Back up a data directory](/docs/operate/backup/) and [Restore a data directory](/docs/operate/restore/).
+
+Related: [Operations overview](/docs/operate/overview/), [Degraded operation](/docs/operations/degraded/), [Observability](/docs/operations/observability/).

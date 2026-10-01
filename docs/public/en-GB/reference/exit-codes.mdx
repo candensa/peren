@@ -1,0 +1,21 @@
+---
+title: "Exit codes"
+description: "How to read peren exit status: success, a failed command, or a bad invocation."
+---
+
+`peren` reports status through the process exit code.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success. The command finished. |
+| `1` | The command failed. Peren prints `error: …` on stderr and exits. |
+| `2` | The invocation is invalid: a missing argument, an unknown subcommand, or a flag outside its range. Peren prints usage text on stderr. Stdout is empty. |
+
+Automation should treat `0` as success, `1` as a failed operation against a parsed command, and `2` as a bad invocation that must be fixed before retrying the same args.
+
+Human-readable error text after `error:` is representative for operators. Prefer structured command output where a command documents a stable JSON or machine shape.
+
+## Related
+
+- [CLI reference](/docs/reference/cli/)
+- [Error reference](/docs/reference/errors/)

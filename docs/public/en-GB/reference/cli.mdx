@@ -1,0 +1,1502 @@
+---
+title: "CLI reference"
+description: "Every public Peren command, argument, option, state change, output, and failure."
+---
+
+The `peren` CLI runs a local project, a node, deployments, data bindings, and operator state under the data directory. This page lists every command, flag, default, accepted value, output, and exit status.
+
+## Global behavior
+
+```sh
+peren <command>
+peren --version
+```
+
+| Flag | Default | Result |
+| --- | --- | --- |
+| `--version` | — | Prints the binary version and exits `0` |
+| `--help` | — | Prints usage text for the command you named and exits `0` |
+| invalid flags | — | Prints usage text on stderr and exits `2`. Stdout is empty |
+
+Most commands take a fleet TOML path. Commands that read or write operator state use `PEREN_DATA_DIR` when set; otherwise they use `./data` relative to the process working directory.
+
+Human-readable lines in examples show the shape of the output. They can change between releases. Use `--json` only where this page says the command prints JSON.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | The command failed. Peren prints `error: …` |
+| `2` | Invalid invocation. Peren prints usage text |
+
+## Project and configuration
+
+### `peren init`
+
+Creates a starter fleet TOML file.
+
+```sh
+peren init [--output <path>] [--service <name>] [--peer-addr <addr>] [--public-addr <addr>] [--worker <path>] [--force]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `--output <path>` | optional | `fleet.toml` | Destination file |
+| `--service <name>` | optional | `api` | Service and socket service name |
+| `--peer-addr <addr>` | optional | `127.0.0.1:7000` | `node.listen` and `node.advertise_addr` |
+| `--public-addr <addr>` | optional | `127.0.0.1:8080` | Public socket listen address |
+| `--worker <path>` | optional | `worker.js` | Written as `worker_bundle_path` only |
+| `--force` | optional | off | Overwrite an existing output file |
+
+**State.** Writes one TOML file. Does not create `worker.js`, `./certs`, or `./data`.
+
+**Output.** `created <path>`
+
+This command mutates the filesystem.
+
+```sh
+peren init --output fleet.toml
+```
+
+```text
+created fleet.toml
+```
+
+**Failure.** Exits `1` if the output file exists and `--force` is not set. Exits `1` if the file cannot be written.
+
+### `peren config validate`
+
+Validates a fleet TOML file without opening listeners.
+
+```sh
+peren config validate <config>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+
+**State.** Reads and validates the config. Writes nothing.
+
+**Output.** `valid <path>`
+
+```sh
+peren config validate fleet.toml
+```
+
+```text
+valid fleet.toml
+```
+
+**Failure.** Exits `1` if the file is missing, unreadable, or fails validation.
+
+### `peren config migrate`
+
+Migrates an external project config into Peren TOML. Same command as `peren migrate`.
+
+```sh
+peren config migrate <source> [output] [--from wrangler|sam|serverless] [--compatibility-date <date>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<source>` | required | — | Source project path |
+| `[output]` | optional | — | Destination path; omitted prints to stdout |
+| `--from <format>` | optional | inferred | `wrangler`, `sam`, or `serverless` |
+| `--compatibility-date <date>` | optional | — | Compatibility date written into services |
+
+**State.** Reads the source project. Writes Peren TOML when `output` is set.
+
+**Output.** Progress text, optional `warning: service …` lines on stderr, then the migrated TOML when printing to stdout.
+
+This command mutates the filesystem when `output` is set.
+
+```sh
+peren config migrate ./app fleet.toml --from wrangler
+```
+
+**Failure.** Exits `1` when migration refuses the source or cannot write the output.
+
+### `peren migrate`
+
+Top-level alias for the same migration path as `peren config migrate`.
+
+```sh
+peren migrate <source> [output] [--from wrangler|sam|serverless] [--compatibility-date <date>]
+```
+
+Arguments, state, output, and failures match `peren config migrate`.
+
+```sh
+peren migrate ./app fleet.toml --from wrangler
+```
+
+## Local development and runtime
+
+### `peren serve`
+
+Starts the configured node and listeners until shutdown.
+
+```sh
+peren serve <config> [--wrangler <path>]… [--socket-fd <name>=<fd>]…
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--wrangler <path>` | optional | none | Repeatable Wrangler overlays |
+| `--socket-fd <name>=<fd>` | optional | none | Repeatable inherited descriptors |
+
+**State.** Loads config, starts the process, opens configured listeners. Inherited `--socket-fd` values are parsed and then refused in this build.
+
+**Output.** Progress lines such as `Starting Peren` / `Peren is running`, then `Stopping Peren` / `Peren stopped` on signal.
+
+```sh
+peren serve fleet.toml
+```
+
+**Failure.** Exits `1` on config, provider, duplicate descriptor, or startup failure. Any `--socket-fd` exits `1` with inherited listener unsupported. Exits `2` on invalid `<name>=<fd>` syntax.
+
+### `peren dev`
+
+Starts a local development session with topology printout and `.dev.vars` loading.
+
+```sh
+peren dev <config> [--wrangler <path>]… [--json]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--wrangler <path>` | optional | none | Repeatable Wrangler overlays |
+| `--json` | optional | off | Print topology as JSON instead of human lines |
+
+**State.** Loads config and `.dev.vars` from the config directory. Preparation forces a memory bucket and rebinds loopback listeners to port 0, then starts the process until shutdown. The file on disk is unchanged. `peren serve` keeps the configured bucket and ports.
+
+**Output.** Without `--json`, representative lines:
+
+```text
+config: .
+service api worker=worker.js
+socket public service=api listen=127.0.0.1:8080
+```
+
+Then progress and `public: http://<addr>`-style listener lines for each ready socket name. With `--json`, a pretty-printed topology object with `services`, `sockets`, and `queues`.
+
+```sh
+peren dev fleet.toml
+```
+
+**Failure.** Exits `1` on config, migration notice refusal, env, or process startup failure.
+
+### `peren test-server`
+
+Starts a local test runtime and prints a readiness JSON object.
+
+```sh
+peren test-server <config> [--wrangler <path>]… [--json]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--wrangler <path>` | optional | none | Repeatable Wrangler overlays |
+| `--json` | optional | off | Accepted. Readiness output is always JSON. |
+
+**State.** Same local process start path as `peren dev`, including `.dev.vars`, until shutdown.
+
+**Output.** One JSON object with `ready`, `sockets`, and `topology`.
+
+```sh
+peren test-server fleet.toml
+```
+
+**Failure.** Exits `1` on config or process startup failure, or if readiness cannot be flushed.
+
+### `peren devcert`
+
+Writes development mTLS certificate material into a directory.
+
+```sh
+peren devcert <output-dir>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<output-dir>` | required | — | Destination directory |
+
+**State.** Writes `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem` under `<output-dir>`. `peren init` records `leaf.pem` and `leaf.key` in `[mtls]`. Edit those paths after this command. Use only for local development.
+
+**Output.** No success line; exit `0` on success.
+
+This command mutates the filesystem.
+
+```sh
+peren devcert ./certs
+```
+
+**Failure.** Exits `1` if certificate material cannot be written.
+
+## Health and storage checks
+
+### `peren doctor`
+
+Runs diagnostics against a fleet config.
+
+```sh
+peren doctor <config> [--storage-test] [--read-only]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--storage-test` | optional | off | Run storage diagnose |
+| `--read-only` | optional | off | Requires `--storage-test`; storage probe is read-only |
+
+**State.** Reads config. With `--storage-test`, may probe storage; `--read-only` avoids writable probes.
+
+**Output.** Representative:
+
+```text
+node: 00000000-0000-0000-0000-000000000001
+services: 1
+sockets: 1
+storage: skipped
+```
+
+`storage` is `skipped`, `readonly`, or `writable`.
+
+```sh
+peren doctor fleet.toml
+```
+
+**Failure.** Exits `1` on config or diagnose failure. Exits `2` if `--read-only` is set without `--storage-test`.
+
+### `peren status`
+
+Reports readiness summary for the fleet config.
+
+```sh
+peren status <config> [--json] [--storage-test]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--json` | optional | off | Emit JSON |
+| `--storage-test` | optional | off | Writable storage probe; without it storage diagnose is read-only and skipped |
+
+**State.** Reads config. Optional storage probe may touch provider state when `--storage-test` is set.
+
+**Output.** Human:
+
+```text
+ready: true
+node: 00000000-0000-0000-0000-000000000001
+services: 1
+sockets: 1
+storage: skipped
+```
+
+JSON shape: `ready`, `node`, `services`, `sockets`, `storage`.
+
+```sh
+peren status fleet.toml --json
+```
+
+**Failure.** Exits `1` on config or diagnose failure.
+
+### `peren diagnose`
+
+Validates config and optional storage readiness.
+
+```sh
+peren diagnose <config> [--storage-test] [--read-only] [--json]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--storage-test` | optional | off | Run storage diagnose |
+| `--read-only` | optional | off | Requires `--storage-test` |
+| `--json` | optional | off | Requires `--storage-test` |
+
+**State.** Reads config. Optional storage probe as for `doctor`.
+
+**Output.** Same human fields as `doctor` (without `ready`). JSON emits `node`, `services`, `sockets`, `storage`.
+
+```sh
+peren diagnose fleet.toml --storage-test --json
+```
+
+**Failure.** Exits `1` on config or diagnose failure. Exits `2` if `--json` or `--read-only` is set without `--storage-test`.
+
+### `peren conformance storage`
+
+Checks that the configured bucket can do the writes and reads ownership and recovery need.
+
+```sh
+peren conformance storage <config>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+
+**State.** Reads config and writes probe records in the configured bucket.
+
+**Output.** Representative:
+
+```text
+storage node=<uuid> cell=<id> epoch=<n> revision=<n> bytes=<n> range_read=<bool>
+```
+
+```sh
+peren conformance storage fleet.toml
+```
+
+**Failure.** Exits `1` when the bucket cannot complete the check.
+
+## Node lifecycle
+
+### `peren node health`
+
+Probes configured peer and public socket addresses for HTTP readiness.
+
+```sh
+peren node health <config>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+
+**State.** Reads config. Opens short TCP connections and sends `GET /readyz`. Writes nothing.
+
+**Output.** One line per target: `<name> <address> ready`
+
+```sh
+peren node health fleet.toml
+```
+
+```text
+peer 127.0.0.1:7000 ready
+public 127.0.0.1:8080 ready
+```
+
+**Failure.** Exits `1` if a target does not return `HTTP/1.1 200` within the probe timeout.
+
+### `peren node join`
+
+Verifies a signed node identity token and records the node as active in the local fleet registry.
+
+```sh
+peren node join <config> --key-dir <path> --token <token>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Validated; join uses the token claims |
+| `--key-dir <path>` | required | — | Key material for token verification |
+| `--token <token>` | required | — | Signed node identity token |
+
+**State.** Writes `nodes.json` under `$PEREN_DATA_DIR/fleet` (or `./data/fleet`). Does not start a process or move cells.
+
+**Output.** `node <uuid> joined peer=<addr>`
+
+This command mutates registry state.
+
+```sh
+peren node join fleet.toml --key-dir ./keys --token "$NODE_TOKEN"
+```
+
+**Failure.** Exits `1` on invalid config, bad token, or registry write failure.
+
+### `peren node drain`
+
+Records `draining` for a node in the local fleet registry.
+
+```sh
+peren node drain <config> --node <uuid> [--reason <text>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--node <uuid>` | required | — | Node id |
+| `--reason <text>` | optional | — | Stored on the registry record |
+
+**State.** Writes `draining` in `$PEREN_DATA_DIR/fleet/nodes.json`. Does not move cells and does not change live admission on a running process. Live refusal of new work is a separate control-plane drain. See [Drain a node safely](/docs/operate/drain/).
+
+**Output.** `node <uuid> draining`
+
+This command mutates registry state.
+
+```sh
+peren node drain fleet.toml --node 00000000-0000-0000-0000-000000000002 --reason maintenance
+```
+
+**Failure.** Exits `1` on invalid config or registry write failure.
+
+### `peren node remove`
+
+Records `removed` for a node in the local fleet registry.
+
+```sh
+peren node remove <config> --node <uuid> [--force]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--node <uuid>` | required | — | Node id |
+| `--force` | optional | off | Skip the prior-drain requirement |
+
+**State.** Updates `$PEREN_DATA_DIR/fleet/nodes.json`. Without `--force`, the node must already be `draining`. Does not start a process or migrate cells.
+
+**Output.** `node <uuid> removed`
+
+This command mutates registry state.
+
+```sh
+peren node remove fleet.toml --node 00000000-0000-0000-0000-000000000002
+```
+
+**Failure.** Exits `1` if the node is not draining and `--force` is absent, or on registry write failure.
+
+## Deployment lifecycle
+
+### `peren deploy`
+
+Records a generation digest and percent for each configured service under the data directory.
+
+```sh
+peren deploy <config> [--percent <0-100>] [--preview] [--skip-verify]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required at runtime | — | Optional on the command line. Peren refuses a missing path. |
+| `--percent <0-100>` | optional | `100` | Stored on the generation record |
+| `--preview` | optional | off | Records preview with percent `0` and inactive |
+| `--skip-verify` | optional | off | Accepted. Peren does not use it. |
+
+**State.** Writes deployment registry state under `$PEREN_DATA_DIR`. The running process keeps serving the bundle loaded at start. The percent does not split live traffic.
+
+**Output.** `deployed <service> <digest> preview=<bool> percent=<n> maps=<n>` per service.
+
+This command mutates deployment records.
+
+```sh
+peren deploy fleet.toml --percent 100
+```
+
+```text
+deployed api sha256:… preview=false percent=100 maps=0
+```
+
+**Failure.** Exits `1` if config is missing, validation fails, or the record cannot be written. Exits `2` if `--percent` is outside `0..=100`.
+
+### `peren deploy health`
+
+Reads recorded generation health.
+
+```sh
+peren deploy health <config> [--service <name>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | optional | all services | Limit to one service |
+
+**State.** Reads deployment registry. Writes nothing.
+
+**Output.** `<service> <digest> healthy percent=<n>`
+
+```sh
+peren deploy health fleet.toml --service api
+```
+
+**Failure.** Exits `1` when the registry or service lookup fails.
+
+### `peren deploy list`
+
+Lists recorded generations.
+
+```sh
+peren deploy list <config> [--service <name>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | optional | all services | Limit to one service |
+
+**State.** Reads deployment registry. Writes nothing.
+
+**Output.** `<service> <digest> active=<bool> preview=<bool> percent=<n> entry=<path> modules=<n> maps=<n>`
+
+```sh
+peren deploy list fleet.toml
+```
+
+**Failure.** Exits `1` when the registry cannot be read.
+
+### `peren deploy verify`
+
+Verifies artifact and descriptor digests against recorded generations.
+
+```sh
+peren deploy verify <config> [--service <name>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | optional | all services | Limit to one service |
+
+**State.** Reads config, bundles on disk, and deployment registry. Writes nothing.
+
+**Output.** `<service> <digest> verified active=<bool> percent=<n>`
+
+```sh
+peren deploy verify fleet.toml --service api
+```
+
+**Failure.** Exits `1` on digest drift or missing generation.
+
+### `peren deploy prune`
+
+Removes old generation records after retention.
+
+```sh
+peren deploy prune <config> --service <name> [--keep <count>] [--dry-run]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service whose history is pruned |
+| `--keep <count>` | optional | `5` | Generations to retain |
+| `--dry-run` | optional | off | Report without deleting |
+
+**State.** With `--dry-run`, reads only. Without it, deletes older generation records from the deployment registry.
+
+**Output.** `would prune <n> generation(s)` or `pruned <n> generation(s)`
+
+```sh
+peren deploy prune fleet.toml --service api --keep 5 --dry-run
+```
+
+This command mutates deployment records when `--dry-run` is absent.
+
+```sh
+peren deploy prune fleet.toml --service api --keep 5
+```
+
+**Failure.** Exits `1` when the service is missing or the registry cannot be updated.
+
+### `peren rollback`
+
+Activates a recorded generation digest when the files on disk already match that digest.
+
+```sh
+peren rollback <config> --service <name> [--to <digest>] [--skip-verify]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service to roll back |
+| `--to <digest>` | optional | previous inactive generation | Target digest |
+| `--skip-verify` | optional | off | Accepted. Peren does not use it. |
+
+**State.** Updates active flags in the deployment registry. Does not restore old bundle files. Refuses when the digest on disk does not match the recorded digest.
+
+**Output.** `rolled back <service> to <digest>`
+
+This command mutates deployment records.
+
+```sh
+peren rollback fleet.toml --service api --to sha256:…
+```
+
+**Failure.** Exits `1` when no rollback target exists, the digest is unknown, or on-disk content has drifted.
+
+## Backup, restore and upgrade
+
+### `peren backup`
+
+Copies the local data directory to an output path.
+
+```sh
+peren backup <config> --output <path>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Validated before backup |
+| `--output <path>` | required | — | Destination directory; must not exist |
+
+**State.** Copies `$PEREN_DATA_DIR` (or `./data`) to `--output`.
+
+**Output.** `backed up <source> to <output> files=<n>`
+
+This command mutates the filesystem.
+
+```sh
+peren backup fleet.toml --output ./backup-2026-03-01
+```
+
+**Failure.** Exits `1` if the data directory is absent or the output path already exists.
+
+### `peren restore`
+
+Restores a backup directory into the local data directory.
+
+```sh
+peren restore <config> --input <path> [--force]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Validated before restore |
+| `--input <path>` | required | — | Backup directory |
+| `--force` | optional | off | Replace an existing data directory |
+
+**State.** Writes `$PEREN_DATA_DIR` (or `./data`) from `--input`. With `--force`, deletes the existing data directory first.
+
+**Output.** `restored <input> to <output> files=<n>`
+
+This command mutates the filesystem.
+
+```sh
+peren restore fleet.toml --input ./backup-2026-03-01 --force
+```
+
+**Failure.** Exits `1` if input is missing, or if the data directory exists without `--force`.
+
+### `peren upgrade check`
+
+Checks whether the current state can upgrade toward a target version label.
+
+```sh
+peren upgrade check <config> [--target <version>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--target <version>` | optional | — | Target version label |
+
+**State.** Reads config and local state. Writes nothing.
+
+**Output.** `upgrade check current=<v> target=<v> storage=<s> services=<n> sockets=<n>`
+
+```sh
+peren upgrade check fleet.toml --target 0.2.0
+```
+
+**Failure.** Exits `1` on config or check failure.
+
+### `peren upgrade plan`
+
+Prints ordered upgrade steps.
+
+```sh
+peren upgrade plan <config> [--target <version>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--target <version>` | optional | — | Target version label |
+
+**State.** Reads config and local state. Writes nothing.
+
+**Output.** A summary line plus numbered steps.
+
+```sh
+peren upgrade plan fleet.toml --target 0.2.0
+```
+
+**Failure.** Exits `1` on config or plan failure.
+
+### `peren uninstall`
+
+Deletes the local data directory.
+
+```sh
+peren uninstall <config> [--force] [--dry-run]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Validated before uninstall |
+| `--force` | optional | off | Required to delete unless `--dry-run` |
+| `--dry-run` | optional | off | Report without deleting |
+
+**State.** Targets `$PEREN_DATA_DIR` (or `./data`). `--dry-run` counts files only. Without `--dry-run`, deletion requires `--force`.
+
+**Output.** `would uninstall <path> files=<n>` or `uninstalled <path> files=<n>`
+
+```sh
+peren uninstall fleet.toml --dry-run
+```
+
+This command mutates the filesystem when `--dry-run` is absent and `--force` is set.
+
+```sh
+peren uninstall fleet.toml --force
+```
+
+**Failure.** Exits `1` if deletion is requested without `--force`.
+
+## Data operations
+
+### `peren d1 query`
+
+Executes SQL against a configured D1 binding.
+
+```sh
+peren d1 query <config> --service <name> --binding <name> --sql <sql>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service owning the binding |
+| `--binding <name>` | required | — | D1 binding name |
+| `--sql <sql>` | required | — | SQL statement |
+
+**State.** Reads and may mutate the native SQLite or Turso database behind the binding. External D1 backends are refused.
+
+**Output.** One JSON object per result row, or metadata for non-row statements.
+
+This command may mutate database state.
+
+```sh
+peren d1 query fleet.toml --service api --binding DB --sql "SELECT 1 AS value"
+```
+
+**Failure.** Exits `1` for missing binding, unsupported backend, or SQL failure.
+
+### `peren d1 migrate`
+
+Applies `.sql` migration files from a directory in name order.
+
+```sh
+peren d1 migrate <config> --service <name> --binding <name> --dir <path>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service owning the binding |
+| `--binding <name>` | required | — | D1 binding name |
+| `--dir <path>` | required | — | Directory of `.sql` files |
+
+**State.** Applies migrations to the native SQLite or Turso binding database.
+
+**Output.** `applied <n> migration(s)`
+
+This command mutates database state.
+
+```sh
+peren d1 migrate fleet.toml --service api --binding DB --dir ./migrations
+```
+
+**Failure.** Exits `1` for missing directory, binding, unsupported backend, or migration failure.
+
+### `peren d1 restore`
+
+Always refuses. Native D1 has no time travel.
+
+```sh
+peren d1 restore <config> --service <name> --binding <name> --into <path> (--to <time> | --bookmark <id>)
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service owning the binding |
+| `--binding <name>` | required | — | D1 binding name |
+| `--into <path>` | required | — | Destination database path |
+| `--to <time>` | one of group | — | Mutually exclusive with `--bookmark` |
+| `--bookmark <id>` | one of group | — | Mutually exclusive with `--to` |
+
+**State.** No restore is performed.
+
+**Output.** None on success path; the command does not succeed.
+
+```sh
+peren d1 restore fleet.toml --service api --binding DB --into ./restored.db --to 2026-01-01T00:00:00Z
+```
+
+**Failure.** Exits `1` with unsupported: D1 time-travel snapshots and bookmarks are not available in the current native storage model. Exits `2` if neither `--to` nor `--bookmark` is supplied.
+
+### `peren d1 prune-history`
+
+Validates a D1 binding and reports prune counts for the current storage model.
+
+```sh
+peren d1 prune-history <config> --service <name> --binding <name> [--retention-days <days>] [--dry-run]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service owning the binding |
+| `--binding <name>` | required | — | D1 binding name |
+| `--retention-days <days>` | optional | — | Accepted; does not change retention |
+| `--dry-run` | optional | off | Changes the printed verb only |
+
+**State.** Does not delete history. Native SQLite and Turso report `pruned=0`. `--retention-days` is accepted and does not change retention.
+
+**Output.** `would prune 0 histories` or `pruned 0 histories`
+
+```sh
+peren d1 prune-history fleet.toml --service api --binding DB --dry-run
+```
+
+**Failure.** Exits `1` for missing binding or external backend.
+
+### `peren kv bulk-import`
+
+Imports KV records from a file into a configured binding.
+
+```sh
+peren kv bulk-import <config> --service <name> --binding <name> --file <path>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service owning the binding |
+| `--binding <name>` | required | — | KV binding name |
+| `--file <path>` | required | — | Import file |
+
+**State.** Writes entries into the KV provider for the binding.
+
+**Output.** `imported <n> entry/entries`
+
+This command mutates KV state.
+
+```sh
+peren kv bulk-import fleet.toml --service api --binding KV --file ./entries.json
+```
+
+**Failure.** Exits `1` on missing binding, unreadable file, or import failure.
+
+## Queue operations
+
+### `peren queue depth`
+
+Reads queue depth counters.
+
+```sh
+peren queue depth <config> --queue <name>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--queue <name>` | required | — | Queue name |
+
+**State.** Reads queue broker state. Writes nothing.
+
+**Output.** `queue <name> ready=<n> delayed=<n> leased=<n> paused=<bool>`
+
+```sh
+peren queue depth fleet.toml --queue orders
+```
+
+**Failure.** Exits `1` when the queue or broker refuses the read.
+
+### `peren queue pause`
+
+Stops leasing new messages from a queue.
+
+```sh
+peren queue pause <config> --queue <name>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--queue <name>` | required | — | Queue name |
+
+**State.** Marks the queue paused according to broker semantics.
+
+**Output.** `queue <name> paused changed=<bool>`
+
+This command mutates queue state.
+
+```sh
+peren queue pause fleet.toml --queue orders
+```
+
+**Failure.** Exits `1` when the broker refuses pause.
+
+### `peren queue resume`
+
+Allows leasing to resume.
+
+```sh
+peren queue resume <config> --queue <name>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--queue <name>` | required | — | Queue name |
+
+**State.** Clears the paused mark according to broker semantics.
+
+**Output.** `queue <name> resumed changed=<bool>`
+
+This command mutates queue state.
+
+```sh
+peren queue resume fleet.toml --queue orders
+```
+
+**Failure.** Exits `1` when the broker refuses resume.
+
+### `peren queue purge`
+
+Removes queued messages according to broker semantics.
+
+```sh
+peren queue purge <config> --queue <name>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--queue <name>` | required | — | Queue name |
+
+**State.** Deletes queued messages and fences live leases per broker rules.
+
+**Output.** `queue <name> purged queued=<n> leased=<n>`
+
+This command mutates queue state.
+
+```sh
+peren queue purge fleet.toml --queue orders
+```
+
+**Failure.** Exits `1` when the broker refuses purge.
+
+### `peren queue redrive`
+
+Moves dead-letter messages from a source queue to a target queue.
+
+```sh
+peren queue redrive <config> --source <name> --target <name>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--source <name>` | required | — | Source queue |
+| `--target <name>` | required | — | Target queue |
+
+**State.** Moves messages according to broker semantics.
+
+**Output.** `queue <source> redriven to <target> moved=<n>`
+
+This command mutates queue state.
+
+```sh
+peren queue redrive fleet.toml --source orders-dlq --target orders
+```
+
+**Failure.** Exits `1` when the broker refuses redrive.
+
+## Logs and live inspection
+
+### `peren logs`
+
+Reads the local tail event log for a service. Same command as `peren tail`.
+
+```sh
+peren logs <config> --service <name> [--level log|warn|error] [--node <node>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service filter |
+| `--level <level>` | optional | all events | `log` (all), `warn` (request status ≥ 400, console `Warn` and `Error`), or `error` (request status ≥ 500, console `Error`) |
+| `--node <node>` | optional | — | Accepted. Peren does not use it. |
+
+**State.** Reads `$PEREN_DATA_DIR/tail/events.jsonl` (or `./data/tail/events.jsonl`). Writes nothing. There is no `--kind` flag and no `--json` flag.
+
+**Output.** One human-readable line per matching event. Representative:
+
+```text
+api POST /checkout status=500 outcome=error wall_time_ms=37
+api console Error checkout failed
+```
+
+```sh
+peren logs fleet.toml --service api --level error
+```
+
+**Failure.** Exits `1` if the service is absent from config or the log cannot be read. Exits `2` if `--service` is omitted.
+
+See [peren logs](/docs/cli/logs/) and [peren tail](/docs/cli/tail/).
+
+### `peren tail`
+
+Reads the same event file as `peren logs`, with the same flags and the same output.
+
+```sh
+peren tail <config> --service <name> [--level log|warn|error] [--node <node>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service filter. The name must exist in the fleet file |
+| `--level <level>` | optional | all events | `log` (all), `warn` (request status ≥ 400, console `Warn` and `Error`), or `error` (request status ≥ 500, console `Error`) |
+| `--node <node>` | optional | — | Accepted. Peren does not use it |
+
+There is no `--kind` flag and no `--json` flag.
+
+**State.** Reads `$PEREN_DATA_DIR/tail/events.jsonl`, or `./data/tail/events.jsonl` when `PEREN_DATA_DIR` is unset. Writes nothing. Reads the file once and exits. It does not follow new lines.
+
+**Output.** One line per matching event:
+
+```text
+api POST /checkout status=500 outcome=error wall_time_ms=37
+api console Error checkout failed
+```
+
+```sh
+peren tail fleet.toml --service api --level warn
+```
+
+**Failure.** Exits `2` if `--service` is omitted or `--level` is not `log`, `warn`, or `error`. Exits `1` if the service is absent from config or the log cannot be read. A missing event file prints nothing and exits `0`.
+
+## Identity, tenancy and secrets
+
+### `peren credential mint`
+
+Mints a scoped tenant credential token.
+
+```sh
+peren credential mint <key-dir> --tenant <id> --bucket-prefix <prefix> --scope <scope> [--scopes <csv>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<key-dir>` | required | — | Signing key directory |
+| `--tenant <id>` | required | — | Tenant id |
+| `--bucket-prefix <prefix>` | required | — | Bucket prefix claim |
+| `--scope <scope>` | required | — | First scope |
+| `--scopes <csv>` | optional | none | Additional comma-separated scopes |
+
+**State.** Reads key material. Writes nothing durable beyond printing the token.
+
+**Output.** The token string on stdout.
+
+```sh
+peren credential mint ./keys --tenant acme --bucket-prefix acme/ --scope read
+```
+
+**Failure.** Exits `1` when key material is missing or minting fails.
+
+### `peren credential node`
+
+Mints a node identity token.
+
+```sh
+peren credential node <key-dir> --cluster <id> --node <uuid> --peer-addr <addr>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<key-dir>` | required | — | Signing key directory |
+| `--cluster <id>` | required | — | Cluster id claim |
+| `--node <uuid>` | required | — | Node id |
+| `--peer-addr <addr>` | required | — | Peer address claim |
+
+**State.** Reads key material. Writes nothing durable beyond printing the token.
+
+**Output.** The token string on stdout.
+
+```sh
+peren credential node ./keys --cluster prod --node 00000000-0000-0000-0000-000000000002 --peer-addr 10.0.0.2:7000
+```
+
+**Failure.** Exits `1` when key material is missing or minting fails.
+
+### `peren tenant revoke`
+
+Records tenant revocation in the local registry.
+
+```sh
+peren tenant revoke <config> --tenant-id <id> [--reason <text>] [--node <node>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--tenant-id <id>` | required | — | Tenant id |
+| `--reason <text>` | optional | — | Stored reason |
+| `--node <node>` | optional | — | Accepted. Peren does not use it. |
+
+**State.** Writes a revocation record under the data directory. A running isolate does not read that file to deny a request.
+
+**Output.** `revoked <id>` optionally with `reason=…`
+
+This command mutates registry state.
+
+```sh
+peren tenant revoke fleet.toml --tenant-id acme --reason unpaid
+```
+
+**Failure.** Exits `1` on config or registry write failure.
+
+### `peren tenant delete`
+
+Records tenant deletion in the local registry.
+
+```sh
+peren tenant delete <config> --tenant-id <id> [--reason <text>] [--node <node>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--tenant-id <id>` | required | — | Tenant id |
+| `--reason <text>` | optional | — | Stored reason |
+| `--node <node>` | optional | — | Accepted. Peren does not use it. |
+
+**State.** Writes a deletion record under the data directory. Does not by itself cut off live request handling.
+
+**Output.** `deleted <id>` optionally with `reason=…`
+
+This command mutates registry state.
+
+```sh
+peren tenant delete fleet.toml --tenant-id acme
+```
+
+**Failure.** Exits `1` on config or registry write failure.
+
+### `peren secrets put`
+
+Stores a Worker secret version. Same rotate path as `peren secrets rotate`.
+
+```sh
+peren secrets put <config> --name <name> --value <value> [--node <node>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--name <name>` | required | — | Secret name |
+| `--value <value>` | required | — | Secret value |
+| `--node <node>` | optional | — | Accepted. Peren does not use it. |
+
+**State.** Writes secret metadata and ciphertext under the data directory. Does not print the secret value.
+
+**Output.** `<name> version=<n> digest=<hex> created_at_ms=<n>`
+
+This command mutates secret state.
+
+```sh
+peren secrets put fleet.toml --name API_TOKEN --value "$API_TOKEN"
+```
+
+**Failure.** Exits `1` on config or secret store failure.
+
+### `peren secrets rotate`
+
+Adds a new active Worker secret version.
+
+```sh
+peren secrets rotate <config> --name <name> --value <value> [--node <node>]
+```
+
+Arguments, state, output, and failures match `peren secrets put`.
+
+This command mutates secret state.
+
+```sh
+peren secrets rotate fleet.toml --name API_TOKEN --value "$API_TOKEN"
+```
+
+### `peren secrets list`
+
+Lists secret metadata.
+
+```sh
+peren secrets list <config> [--node <node>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--node <node>` | optional | — | Accepted. Peren does not use it. |
+
+**State.** Reads the secret store. Does not print secret values.
+
+**Output.** One metadata line per secret: `<name> version=<n> digest=<hex> created_at_ms=<n>`
+
+```sh
+peren secrets list fleet.toml
+```
+
+**Failure.** Exits `1` on config or store read failure.
+
+### `peren secrets get`
+
+Reads metadata for one secret.
+
+```sh
+peren secrets get <config> --name <name> [--node <node>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--name <name>` | required | — | Secret name |
+| `--node <node>` | optional | — | Accepted. Peren does not use it. |
+
+**State.** Reads the secret store. Does not print the secret value.
+
+**Output.** `<name> version=<n> digest=<hex> created_at_ms=<n>`
+
+```sh
+peren secrets get fleet.toml --name API_TOKEN
+```
+
+**Failure.** Exits `1` when the secret is missing or the store cannot be read.
+
+### `peren secrets delete`
+
+Deletes a stored Worker secret.
+
+```sh
+peren secrets delete <config> --name <name> [--node <node>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--name <name>` | required | — | Secret name |
+| `--node <node>` | optional | — | Accepted. Peren does not use it. |
+
+**State.** Removes the secret from the local store.
+
+**Output.** `deleted <name> active=<bool>`
+
+This command mutates secret state.
+
+```sh
+peren secrets delete fleet.toml --name API_TOKEN
+```
+
+**Failure.** Exits `1` on config or delete failure.
+
+## Workflow operations
+
+### `peren workflow status`
+
+Reads workflow instance state.
+
+```sh
+peren workflow status <config> --service <name> --binding <name> --instance-id <id>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service owning the binding |
+| `--binding <name>` | required | — | Workflow binding |
+| `--instance-id <id>` | required | — | Instance id |
+
+**State.** Reads workflow control state under the data directory.
+
+**Output.** `workflow <service> <binding> <instance> status=<unknown|canceled|deleted>` optionally with `reason=…`
+
+```sh
+peren workflow status fleet.toml --service api --binding ORDERS --instance-id inst-1
+```
+
+**Failure.** Exits `1` on missing binding or store failure.
+
+### `peren workflow cancel`
+
+Requests workflow cancellation.
+
+```sh
+peren workflow cancel <config> --service <name> --binding <name> --instance-id <id> [--reason <text>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service owning the binding |
+| `--binding <name>` | required | — | Workflow binding |
+| `--instance-id <id>` | required | — | Instance id |
+| `--reason <text>` | optional | — | Cancellation reason |
+
+**State.** Writes canceled status for the instance.
+
+**Output.** `workflow <service> <binding> <instance> status=canceled` optionally with `reason=…`
+
+This command mutates workflow state.
+
+```sh
+peren workflow cancel fleet.toml --service api --binding ORDERS --instance-id inst-1 --reason operator
+```
+
+**Failure.** Exits `1` on missing binding or store failure.
+
+### `peren workflow delete`
+
+Deletes workflow instance state.
+
+```sh
+peren workflow delete <config> --service <name> --binding <name> --instance-id <id>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--service <name>` | required | — | Service owning the binding |
+| `--binding <name>` | required | — | Workflow binding |
+| `--instance-id <id>` | required | — | Instance id |
+
+**State.** Writes deleted status for the instance.
+
+**Output.** `workflow <service> <binding> <instance> status=deleted`
+
+This command mutates workflow state.
+
+```sh
+peren workflow delete fleet.toml --service api --binding ORDERS --instance-id inst-1
+```
+
+**Failure.** Exits `1` on missing binding or store failure.
+
+## Console operations
+
+### `peren console bootstrap`
+
+Creates initial console workspace state and an onboarding token.
+
+```sh
+peren console bootstrap <config> [--workspace-name <name>]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--workspace-name <name>` | optional | — | Workspace name |
+
+**State.** Writes console bootstrap state under the configured console data directory.
+
+**Output.**
+
+```text
+workspace: <name>
+token: <token>
+expires_in_minutes: <n>
+```
+
+This command mutates console state.
+
+```sh
+peren console bootstrap fleet.toml --workspace-name ops
+```
+
+**Failure.** Exits `1` when console is not configured or bootstrap fails.
+
+### `peren console register`
+
+Registers an operator through a bootstrap token.
+
+```sh
+peren console register <config> --token <token> --email <email> --name <name>
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--token <token>` | required | — | Bootstrap token |
+| `--email <email>` | required | — | Operator email |
+| `--name <name>` | required | — | Operator display name |
+
+**State.** Consumes the token and writes the registered user record.
+
+**Output.** `user: <id>` and optional `workspace: <name>`
+
+This command mutates console state.
+
+```sh
+peren console register fleet.toml --token "$CONSOLE_TOKEN" --email ops@example.com --name Ops
+```
+
+**Failure.** Exits `1` on invalid token or registration failure.
+
+## Kubernetes
+
+### `peren kubernetes render`
+
+Renders Helm values for review. Does not apply cluster state.
+
+```sh
+peren kubernetes render <config> [--output <path>] [--image <image>] [--tag <tag>] [--replicas <n>] [--storage <size>] [--service-account-annotation <key=value>]…
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--output <path>` | optional | stdout | Write values file |
+| `--image <image>` | optional | `ghcr.io/candensa/peren` | Container image |
+| `--tag <tag>` | optional | `0.1.0` | Image tag |
+| `--replicas <n>` | optional | `3` | Range `1..=1024` |
+| `--storage <size>` | optional | `10Gi` | Volume size string |
+| `--service-account-annotation <key=value>` | optional | none | Repeatable |
+
+**State.** Reads config. Writes a values file only when `--output` is set.
+
+**Output.** `rendered <path>` or the values document on stdout.
+
+```sh
+peren kubernetes render fleet.toml --output values.yaml
+```
+
+**Failure.** Exits `1` on unreadable config or write failure. Exits `2` on invalid annotation or replica range.
+
+### `peren kubernetes check`
+
+Validates Kubernetes deployment assumptions without contacting the cluster.
+
+```sh
+peren kubernetes check <config> [--replicas <n>] [--json]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--replicas <n>` | optional | `3` | Range `1..=1024` |
+| `--json` | optional | off | Pretty-printed report |
+
+**State.** Reads config. Writes nothing.
+
+**Output.** `kubernetes conformance ok`, or problem/warning lines on stderr. JSON emits the full report.
+
+```sh
+peren kubernetes check fleet.toml --json
+```
+
+**Failure.** Exits `1` when the report contains problems. Exits `2` on invalid replica range.

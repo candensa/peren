@@ -1,0 +1,31 @@
+---
+title: "Architecture"
+description: "How a request moves through a node, service, socket, isolate, cell and bucket."
+---
+
+A Peren node is one running process. It loads services, opens sockets, runs Worker code in isolates, and owns cells while it holds a valid lease. The configured bucket stores ownership records and recovery images. Peer listeners carry fleet traffic. They do not store those records.
+
+<SystemDiagram name="architecture" />
+
+## Parts
+
+- **Node** — one Peren process with a `node_id`, peer listener and local data directory.
+- **Service** — a Worker bundle plus its bindings and entrypoint configuration.
+- **Socket** — a public listener that maps HTTP traffic to one service.
+- **Isolate** — the V8 isolate that runs one Worker invocation.
+- **Cell** — one routed stateful identity with its own SQLite database and one current owner.
+- **Bucket** — the object store that records ownership and published snapshot or WAL bytes used to restore a cell.
+
+## What a request does
+
+1. The socket accepts the connection and selects its configured service.
+2. Peren maps the request to a cell. A public socket derives the cell from the service name and the first path segment. A Durable Object stub derives the cell from the namespace binding and object id.
+3. The node acquires an ownership lease for that cell from the bucket. If another owner is recorded, acquisition fails and the request does not mutate the cell.
+4. The node restores the cell's SQLite database from the latest published replica when one exists, then opens the cell.
+5. The isolate runs the service's `export default` handler with the configured environment and bindings.
+6. Committed mutations write to the cell's SQLite database. Peren then publishes snapshot or WAL records to the bucket under the current ownership epoch.
+7. The node releases ownership for that dispatch so the next acquisition can proceed from a clear owner field.
+
+Worker code receives only declared bindings. Provider credentials, signing keys and peer certificate material stay in the host process. The Worker can call a capability; it cannot read the underlying secret.
+
+Read [Durability](/docs/concepts/durability/) for publish and fencing behavior, [Durable Objects in Peren](/docs/state/objects/) for namespace addressing and [Recovery after node loss](/docs/state/recovery/) for restore checks.

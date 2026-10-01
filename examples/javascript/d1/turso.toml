@@ -1,0 +1,28 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000123"
+advertise_addr = "127.0.0.1:7123"
+listen = "127.0.0.1:7123"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "d1"
+worker_bundle_path = "examples/javascript/d1/worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.DB]
+type = "d1_database"
+database_name = "app"
+unique_key = "app"
+backend = { kind = "turso", url_env = "TURSO_DATABASE_URL", token_env = "TURSO_AUTH_TOKEN", replica_path = ".peren/turso/app.sqlite" }
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8123"
+service = "d1"

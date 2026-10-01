@@ -1,0 +1,16 @@
+POST /peer/v1/forward
+POST /peer/v1/forward-cloudevent
+POST /peer/v1/forward-alarm-delivery
+GET /peer/v1/socket-proxy
+POST /peer/v1/handoff-hint
+POST /peer/v1/gossip-capacity
+POST /peer/v1/probe-health
+POST /peer/v1/recovery-read
+POST /peer/v1/queue-lease-forward
+POST /peer/v1/rebalance-pause
+POST /peer/v1/tenant-revoke
+POST /peer/v1/secrets-rotate
+POST /peer/v1/native-storage-forward
+POST /peer/v1/deploy-nudge
+POST /peer/v1/workflow-cancel
+POST /peer/v1/forward-workflow-cancel

@@ -1,0 +1,94 @@
+---
+title: "D1 example"
+description: "Insert a row into native SQLite through a D1 binding and return the visit count."
+---
+
+This tutorial builds a Worker that creates a table, inserts one row per request, and returns the row count from native SQLite.
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- An empty project directory
+
+## Create the files
+
+Create `worker.js`:
+
+```js
+export default {
+  async fetch(_request, env) {
+    await env.DB.exec("create table if not exists visits (id integer primary key)");
+    await env.DB.prepare("insert into visits default values").run();
+    const row = await env.DB.prepare("select count(*) as count from visits").first();
+    return Response.json({ provider: env.DB.provider.kind, ...row });
+  },
+};
+```
+
+Create `peren.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.DB]
+type = "d1_database"
+database_name = "app"
+unique_key = "app"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+Omit `backend` to use `native_sqlite`.
+
+## Run
+
+```sh
+peren devcert ./certs
+peren dev peren.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for the session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```sh
+curl http://127.0.0.1:54321/
+curl http://127.0.0.1:54321/
+```
+
+Expected JSON on the first request:
+
+```json
+{"provider":"native_sqlite","count":1}
+```
+
+Expected JSON on the second request:
+
+```json
+{"provider":"native_sqlite","count":2}
+```
+
+## Failure
+
+If `worker_bundle_path` points at a missing file, Peren refuses to start and reports that the Worker module could not be read. Create `worker.js`, then run `peren dev peren.toml` again.
+
+## Next
+
+Statement methods, Turso credentials, and refused backends: [D1](/docs/bindings/d1/).

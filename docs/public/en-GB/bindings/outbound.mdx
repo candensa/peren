@@ -1,0 +1,75 @@
+---
+title: "Outbound fetch"
+description: "Allowlist hosts and call them through an outbound binding."
+---
+
+An outbound binding lets a Worker call specific hosts through `env.NAME.fetch`. Peren refuses any other host for that binding. The binding carries no credentials.
+
+## Prerequisites
+
+- A fleet file with `[node]`, `[bucket]`, `[mtls]`, one service, and one socket
+- A Worker bundle that exports `fetch`
+- The upstream host name you will allowlist
+
+## Configure the binding
+
+Write `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.PUBLIC_API]
+type = "outbound"
+allowed_hosts = ["api.example.com"]
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+`type` must be `outbound`. `allowed_hosts` lists host names the binding may call.
+
+## Call the binding
+
+Write `worker.js`:
+
+```js
+export default {
+  async fetch(request, env) {
+    return env.PUBLIC_API.fetch("https://api.example.com/status");
+  },
+};
+```
+
+The Worker calls `env.PUBLIC_API.fetch`. Global `fetch` uses the union of outbound allowlists on that service. Redirect targets are not checked again.
+
+## Success
+
+The upstream HTTP status and body are returned to the Worker as the `Response` from `env.PUBLIC_API.fetch`.
+
+## Failure
+
+A host that is not in `allowed_hosts` throws `TypeError` before the request leaves the node.
+
+## Related
+
+- [Outbound network](/docs/bindings/network/)
+- [Client mTLS](/docs/bindings/mtls/)
+- [AWS SigV4](/docs/bindings/sigv4/)

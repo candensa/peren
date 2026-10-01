@@ -1,0 +1,60 @@
+---
+title: "Drain a node"
+description: "Record a draining membership state, or refuse new work on a live peer listener."
+---
+
+Symptom: a node must leave service for maintenance, replacement, or shutdown, and new work must stop reaching it.
+
+<SystemDiagram name="drain" />
+
+There are two drain paths. They are not the same command.
+
+## Fleet registry drain
+
+`peren node drain` writes `draining` into the local fleet registry under the data directory. It does not move cells. It does not change admission on a running process.
+
+```sh
+peren node drain peren.toml --node 00000000-0000-0000-0000-000000000001 --reason maintenance
+```
+
+Representative output:
+
+```text
+node 00000000-0000-0000-0000-000000000001 draining
+```
+
+## Live admission drain
+
+The live path that returns 503 for new work is the peer control endpoint:
+
+```sh
+curl -sS -X POST http://127.0.0.1:7000/control/v1/node/drain
+```
+
+That call sets readiness false and admission to draining on the running process. New top-level work on that node is refused with 503. The endpoint exists only on the peer listener.
+
+Response fields include `admission`, `ready`, `active`, `disk_removal_safe`, and `retired`. `disk_removal_safe` is true when the listener is not ready and active work is zero.
+
+The `peren` CLI drain command performs the registry write. It does not call the peer control endpoint.
+
+## Remove a node from the registry
+
+`peren node remove` updates the registry to `removed`. It does not wipe disk.
+
+```sh
+peren node remove peren.toml --node 00000000-0000-0000-0000-000000000001
+```
+
+Without `--force`, removal refuses unless a prior drain record exists for that node. Pass `--force` only when the operator has already accepted that the drain precondition will be skipped.
+
+Do not delete local data until durable recovery state exists elsewhere, or until the live control report shows `disk_removal_safe` after a peer drain.
+
+## Verification
+
+```sh
+peren node health peren.toml
+curl -sS http://127.0.0.1:7000/control/v1/node
+curl -sS http://127.0.0.1:8080/readyz
+```
+
+Related: [Operations overview](/docs/operate/overview/), [Networking](/docs/deploy/networking/), [Degraded operation](/docs/operations/degraded/).

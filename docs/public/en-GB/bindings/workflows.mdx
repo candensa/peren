@@ -1,0 +1,95 @@
+---
+title: "Workflows"
+description: "Create and control workflow instances through a binding backed by native storage."
+---
+
+A workflow binding records instance state on `env` and lets the Worker create, read, terminate, and restart those instances. Use it when work needs a durable instance id and status that survive across requests on the same fleet storage. Prefer a queue when you only need fire-and-forget delivery.
+
+<SystemDiagram name="workflow" />
+
+`type` is `workflow`. `class_name` and `unique_key` are required in the fleet file. They are not passed into the hydrated binding object. Instance state is written through native storage under the workflows scope. The binding's `provider.kind` is `native`.
+
+## Methods
+
+| Surface | Methods |
+| --- | --- |
+| Binding | `create(options?)`, `get(id)` |
+| Instance | `status()`, `terminate(reason?)`, `restart()` |
+
+`create` writes a running instance. Pass `options.id` to choose the id; otherwise Peren generates one. `get` returns a handle for an id without creating state. `status` returns the stored record, or `{ id, status: "unknown" }` when no record exists. `terminate` sets status to `terminated`. `restart` sets status to `running`.
+
+## Configure
+
+Create `fleet.toml` and `worker.js`.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "file"
+path = "./data"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.FLOW]
+type = "workflow"
+class_name = "DeployWorkflow"
+unique_key = "deploy-workflow"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+```js
+export default {
+  async fetch(_request, env) {
+    const instance = await env.FLOW.create({ id: "deploy-1" });
+    await instance.terminate("complete");
+    const state = await env.FLOW.get("deploy-1").status();
+    return Response.json({
+      provider: env.FLOW.provider.kind,
+      id: instance.id,
+      status: state.status,
+      reason: state.reason,
+    });
+  },
+};
+```
+
+## Run and verify
+
+```sh
+peren devcert ./certs
+peren serve fleet.toml
+```
+
+`peren serve` keeps the listen addresses and file bucket from the fleet file. `peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session.
+
+```sh
+curl http://127.0.0.1:8080/
+```
+
+Expected JSON includes `"provider":"native"`, `"id":"deploy-1"`, `"status":"terminated"`, and `"reason":"complete"`.
+
+## Failure
+
+Calling `status` on an id that was never created returns `status: "unknown"`. Create the instance first, or treat unknown as missing work rather than a stored failure.
+
+## Related
+
+- [Bindings overview](/docs/bindings/overview/)
+- [Runtime API reference](/docs/reference/runtime/)
+- [Workers](/docs/build/workers/)

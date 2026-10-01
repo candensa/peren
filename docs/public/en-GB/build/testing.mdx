@@ -1,0 +1,97 @@
+---
+title: "Test applications"
+description: "Exercise Workers against peren test-server and the Peren Vitest plugin."
+---
+
+Test Workers against a real Peren process so dispatch, bindings and handlers match development behavior. Start with `peren test-server`, then add the Vitest plugin when you want the same server inside a test runner.
+
+## peren test-server
+
+```sh
+peren test-server fleet.toml
+```
+
+The command loads the fleet file, prepares a single-node test configuration, starts the process and prints one JSON readiness line to stdout. The line includes `ready`, the bound `sockets` map and a `topology` summary of services, sockets and queue consumers. Representative sockets field:
+
+```json
+{"ready":true,"sockets":{"public":"127.0.0.1:54321"}}
+```
+
+Preparation forces `[bucket].kind = "memory"`, requires loopback listen addresses, refuses non-empty `seed_peers`, and refuses a configured `[deploy]` table. Listeners bind to port `0` so the OS assigns free ports. Read the `sockets` map from the readiness line before sending traffic.
+
+Send requests to a printed socket:
+
+```sh
+curl http://127.0.0.1:54321/
+```
+
+A 200 response with the Worker body proves the bundle loaded and HTTP dispatch ran. If the process exits before printing readiness, fix the fleet file with `peren config validate fleet.toml` or `peren diagnose fleet.toml`, then run `peren test-server` again.
+
+Stop the server with the process interrupt signal used for other long-running `peren` commands.
+
+## What to assert
+
+Useful application tests prove observable behavior:
+
+- the Worker returns the expected status and body for a path;
+- a binding method returns the expected value or error;
+- a queue message is delivered, acked or retried;
+- a durable mutation is visible on a later request after the process restarts when your topology keeps that state;
+- an oversized body or disallowed outbound host is refused.
+
+## @peren/vitest-plugin
+
+`@peren/vitest-plugin` starts `peren test-server` for the Vitest session and exposes Worker helpers through `cloudflare:test` or `peren:test`. Requires Node.js 20 or newer and a `peren` binary on `PATH`, or set `perenBin` in the plugin options.
+
+Install:
+
+```sh
+npm install -D @peren/vitest-plugin vitest vite
+```
+
+Configure:
+
+```ts
+import { defineConfig } from "vitest/config";
+import { perenTest } from "@peren/vitest-plugin";
+
+export default defineConfig({
+  plugins: [
+    perenTest({
+      config: "fleet.toml",
+    }),
+  ],
+  test: {
+    environment: "node",
+  },
+});
+```
+
+Call the Worker and configured bindings:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { env, SELF } from "cloudflare:test";
+
+describe("api", () => {
+  it("serves the Worker", async () => {
+    const response = await SELF.fetch("https://example.test/");
+    expect(response.status).toBe(200);
+  });
+
+  it("reads a KV binding", async () => {
+    await env.CACHE.put("hello", "world");
+    await expect(env.CACHE.get("hello")).resolves.toBe("world");
+  });
+});
+```
+
+`peren:test` exports the same helpers as `cloudflare:test`. Plugin options include `config` (required), `socket`, `wrangler`, `perenBin` and `readyTimeoutMs`.
+
+Some helpers in the test plugin are not on the live isolate `ctx`. Call `SELF.fetch` and bindings through the test server. Do not call `passThroughOnException` on `ctx`. The runtime does not provide it.
+
+## Related
+
+- [Workers](/docs/build/workers/)
+- [Quickstart](/docs/start/quickstart/)
+- [CLI reference](/docs/reference/cli/)

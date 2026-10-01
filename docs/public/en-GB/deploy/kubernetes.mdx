@@ -1,0 +1,57 @@
+---
+title: "Render Kubernetes values"
+description: "Produce Helm values from a fleet config, or check whether that config fits a multi-replica cluster."
+---
+
+Render reviewable Helm values from a fleet config, or check whether the config is suitable for a multi-replica Kubernetes fleet. Neither command applies objects to the cluster.
+
+Kubernetes hosts the Peren process. It does not become the coordinator for cell ownership. Ownership, leases, and recovery remain Peren's responsibility.
+
+## Check before you render
+
+```sh
+peren kubernetes check peren.toml --replicas 3
+```
+
+Defaults: `--replicas` is `3` (range 1–1024). Pass `--json` for structured output.
+
+The check reports problems when:
+
+- `--replicas` is greater than 1 and `[bucket].kind` is `memory` or `file`;
+- `[node].listen` or a socket listen address is not an IP socket address;
+- a listen address binds to loopback.
+
+It warns when an S3 bucket uses `credentials_source` of `configured` or `environment`, and prefers workload identity, IRSA, or pod identity so provider credentials stay host-owned.
+
+Success prints `kubernetes conformance ok`. Problems exit non-zero.
+
+## Render values
+
+```sh
+peren kubernetes render peren.toml --output values.yaml
+```
+
+Defaults:
+
+| Flag | Default |
+| --- | --- |
+| `--image` | `ghcr.io/candensa/peren` |
+| `--tag` | `0.1.0` |
+| `--replicas` | `3` |
+| `--storage` | `10Gi` |
+
+Optional: `--service-account-annotation key=value` (repeatable).
+
+With `--output`, the command writes the values file and prints `rendered <path>`. Without `--output`, it prints the values to stdout. It does not run Helm and it does not apply the cluster.
+
+The rendered file contains:
+
+- `replicaCount`
+- `image.repository`, `image.tag`, `image.pullPolicy` (`IfNotPresent`)
+- `serviceAccount.create`, `serviceAccount.automount`, and optional annotations
+- `storage.size`
+- `config.existingSecret` (empty string), `config.fileName` (`config.toml`), and `config.inline` with the fleet config text
+
+Review the file, supply a chart that consumes those keys, and apply it with your cluster tooling.
+
+Related: [Deployment overview](/docs/deploy/overview/), [Networking](/docs/deploy/networking/), [Production checklist](/docs/start/production/).

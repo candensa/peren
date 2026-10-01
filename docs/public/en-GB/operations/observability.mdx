@@ -1,0 +1,57 @@
+---
+title: "Observability"
+description: "Use health, readiness, metrics, logs, and tail on a running Peren node."
+---
+
+Observe a node through three HTTP endpoints and two CLI readers. Configure exporters that this build refuses out of the public path.
+
+<SystemDiagram name="observability" />
+
+## Endpoints that work
+
+On configured listeners:
+
+| Path | Meaning |
+| --- | --- |
+| `/healthz` | Process is alive. Always 200 when the listener answers. |
+| `/readyz` | Listener is ready for traffic. Returns 200 or 503. |
+| `/metrics` | Prometheus text exposition of process and runtime series. |
+
+An operator may scrape `/metrics` with Prometheus. That choice belongs to the operator's monitoring stack. Peren does not ship Grafana dashboards as a product feature.
+
+```sh
+curl -sS http://127.0.0.1:8080/healthz
+curl -sS http://127.0.0.1:8080/readyz
+curl -sS http://127.0.0.1:8080/metrics
+```
+
+Metric names and HELP text are listed in [Metrics reference](/docs/reference/metrics/).
+
+## Logs and tail
+
+`peren logs` and `peren tail` read the same local event stream for one service. `--service` is required. There is no `--kind` flag.
+
+```sh
+peren tail peren.toml --service api --level error
+peren logs peren.toml --service api --level warn
+```
+
+Optional `--level` is `log`, `warn`, or `error`. Request events print method, path, status, outcome, and wall time. Console events print Worker `console` severity and message.
+
+Representative request line:
+
+```text
+api POST /checkout status=500 outcome=error wall_time_ms=37
+```
+
+Representative console line:
+
+```text
+api console Error checkout failed
+```
+
+## Config that fails validation
+
+`[otlp]` and `[logpush]` fail config validation in this build. Do not add them to a production fleet file expecting export to start.
+
+Related: [Metrics reference](/docs/reference/metrics/), [Operations overview](/docs/operate/overview/), [Degraded operation](/docs/operations/degraded/).

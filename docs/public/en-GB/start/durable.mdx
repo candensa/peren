@@ -1,0 +1,126 @@
+---
+title: "Build your first Durable Object"
+description: "Write SQLite-backed cell state, restart the node, and verify the value remains."
+---
+
+This tutorial extends the quickstart with one Durable Object-style cell. You write a counter through `Peren.storage`, restart the process, and read the same value again.
+
+`peren dev` forces a memory bucket for the session. Use `peren serve` here so the file bucket from `fleet.toml` remains and the public listen address stays at the configured port.
+
+## Prerequisites
+
+- A completed [Quickstart](/docs/start/quickstart/) in the project directory
+- `fleet.toml`, `worker.js`, and `./certs` from that path
+
+## Worker
+
+Replace `worker.js` with:
+
+```js
+export default {
+  async fetch(request) {
+    const key = new URL(request.url).pathname.slice(1) || "counter";
+    const value = await Peren.storage.transaction(async (storage) => {
+      const current = await storage.get(key);
+      const next =
+        current === undefined
+          ? 1
+          : Number(new TextDecoder().decode(current)) + 1;
+      await storage.put(key, String(next));
+      return next;
+    });
+    return Response.json({ key, value });
+  },
+};
+```
+
+`Peren.storage` accepts string or `Uint8Array` values. `get` returns `Uint8Array` or `undefined`. Writes inside `transaction` commit together; a thrown error rolls the transaction back.
+
+Peren routes each request to a cell derived from the service name and the first path segment. `/counter` and `/other` are different cells.
+
+## Config
+
+Keep the fleet file from init, with `[mtls]` paths aligned to `peren devcert` output:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "file"
+path = "./data"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+Use the same working directory for every command so Peren reopens the same local data directory (`./data` by default).
+
+## Run and verify
+
+```sh
+peren serve fleet.toml
+```
+
+In another terminal:
+
+```sh
+curl http://127.0.0.1:8080/counter
+curl http://127.0.0.1:8080/counter
+```
+
+Expected bodies:
+
+```json
+{"key":"counter","value":1}
+```
+
+```json
+{"key":"counter","value":2}
+```
+
+Stop the process with Ctrl+C. Start it again:
+
+```sh
+peren serve fleet.toml
+```
+
+```sh
+curl http://127.0.0.1:8080/counter
+```
+
+Expected body:
+
+```json
+{"key":"counter","value":3}
+```
+
+The third response proves the cell reopened SQLite-backed state from the local data directory after restart.
+
+## Failure: missing Worker file
+
+If `worker_bundle_path` points at a missing file, Peren refuses to start and reports that the Worker module could not be read. Create the file, then run `peren serve fleet.toml` again.
+
+## What you built
+
+Peren loaded the Worker, selected a cell for the `api` service and the `counter` path segment, committed the storage transaction, and reopened that cell after restart. The file bucket remains available for recovery records on this host; multi-node recovery against shared object storage is a later path.
+
+## Clean up
+
+Stop the process. Remove the local `data` directory if you do not need the state.
+
+Next: [Move from local development to production](/docs/start/production/), or the longer [Build a stateful Worker](/docs/tutorial/) walkthrough.

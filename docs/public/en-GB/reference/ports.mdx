@@ -1,0 +1,59 @@
+---
+title: "Ports and endpoints"
+description: "Peer listen, public sockets, health endpoints, and what peren dev changes."
+---
+
+Peren binds one peer listener and zero or more public sockets. Both are plain TCP. The process does not terminate inbound TLS.
+
+## Peer listener
+
+`[node].listen` is the peer listen address. Control routes that mutate admission and deployment records are served only on this listener. A request to the same path on a public socket returns `404`.
+
+Live drain that refuses new work:
+
+```text
+POST /control/v1/node/drain
+```
+
+You keep the peer port off the public network.
+
+## Public sockets
+
+Each `[[sockets]]` entry has its own `listen` address and targets a named service. Application traffic reaches Workers through that address.
+
+## Endpoints on every listener
+
+These routes exist on the peer listener and on each public socket:
+
+| Path | Behavior |
+| --- | --- |
+| `/healthz` | Returns `200` when the listener answers. |
+| `/readyz` | Returns `200` when readiness is true, otherwise `503`. |
+| `/metrics` | Prometheus text metrics for the process. |
+
+## `peren dev` versus `peren serve`
+
+| Command | Listen addresses |
+| --- | --- |
+| `peren dev` | Rebinds loopback peer and socket listens to port `0` (and forces a memory bucket for the session). Use the `name: http://…` lines it prints. |
+| `peren serve` | Keeps the configured listen addresses from the fleet file. |
+
+Non-loopback addresses are refused for `peren dev`.
+
+## `[mtls]`
+
+```toml
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+```
+
+These paths are required in config. They do not terminate inbound TLS on peer or public listeners. Outbound Worker client certificates are a separate `mtls_certificate` binding. See [Networking](/docs/deploy/networking/) and [Client mTLS](/docs/bindings/mtls/).
+
+## Related
+
+- [Networking](/docs/deploy/networking/)
+- [Drain a node](/docs/operate/drain/)
+- [Observability](/docs/operations/observability/)
+- [Metrics reference](/docs/reference/metrics/)

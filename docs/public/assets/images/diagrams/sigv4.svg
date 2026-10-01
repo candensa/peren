@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1127 420" role="img" aria-labelledby="title">
+<title id="title">Signing happens in the node, not the isolate.</title>
+<defs>
+  <marker id="sigv4-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="sigv4-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1127" height="420" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="60" width="311" height="296" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="84" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">ISOLATE</text>
+<rect x="363" y="24" width="439" height="372" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="379" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">THE NODE</text>
+<rect x="851" y="120" width="252" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="867" y="144" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">UPSTREAM</text>
+<path d="M 272.0 144.0 L 333.5 144.0 L 333.5 108.0 L 395.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#sigv4-end)"/>
+<path d="M 635.0 108.0 L 670.0 108.0 L 670.0 184.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#sigv4-end)"/>
+<path d="M 770.0 212.0 L 826.5 212.0 L 826.5 204.0 L 883.0 204.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#sigv4-end)"/>
+<path d="M 179.5 256.0 L 179.5 214.0 L 172.0 214.0 L 172.0 172.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#sigv4-end)"/>
+<rect x="130.7" y="224.0" width="133.6" height="22" rx="6" fill="#fbfaf7"/>
+<text x="197.5" y="239.0" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">stops at isolate</text>
+<path d="M 515.0 136.0 L 515.0 212.0 L 530.0 212.0 L 530.0 288.0" fill="none" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#sigv4-end)"/>
+<rect x="72" y="116" width="200" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="172" y="149.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">Worker fetch</text>
+<circle cx="72" cy="116" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="72" y="120" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">1</text>
+<rect x="56" y="256" width="247" height="68" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="179.5" y="295.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">keys stay undefined on env</text>
+<rect x="395" y="80" width="240" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="515" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">host / region / service</text>
+<circle cx="395" cy="80" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="395" y="84" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">2</text>
+<rect x="570" y="184" width="200" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="670" y="217.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">node signs</text>
+<circle cx="570" cy="184" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="570" y="188" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">3</text>
+<rect x="410" y="288" width="240" height="76" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="530" y="323.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">runtime host</text>
+<text x="530" y="339.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">operation failed</text>
+<rect x="883" y="176" width="188" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="977" y="209.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">upstream</text>
+<circle cx="883" cy="176" r="11" fill="#fbfaf7" stroke="#141414" stroke-width="1.4"/>
+<text x="883" y="180" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="700">4</text>
+</svg>

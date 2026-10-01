@@ -1,0 +1,182 @@
+---
+title: "Vector indexes"
+description: "Upsert and query embeddings through a local index or an HTTP, Qdrant, Pinecone, or Weaviate provider."
+---
+
+A vectorize binding stores and queries embeddings through `upsert`, `query`, `getByIds`, and `deleteByIds`. Worker code keeps one API. The provider chooses where vectors live and which credentials Peren attaches in the node process.
+
+## Prerequisites
+
+- A fleet file with `[node]`, `[bucket]`, `[mtls]`, one service, and one socket
+- Development certificates from `peren devcert ./certs` when you run locally
+- For external providers, the process environment variables named by their credential fields
+
+## Local index
+
+Write `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "vector"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.VECTORS]
+type = "vectorize"
+endpoint = "articles"
+credential_scope = "vectors"
+
+[services.bindings.VECTORS.provider]
+kind = "local"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "vector"
+```
+
+`type` must be `vectorize`. `endpoint` names the local index. `credential_scope` is required. Omitting `provider`, or setting `kind = "local"`, stores vectors in node-local storage.
+
+Write `worker.js`:
+
+```js
+export default {
+  async fetch(_request, env) {
+    await env.VECTORS.upsert([
+      { id: "intro", values: [1, 0, 0], metadata: { title: "Intro" } },
+      { id: "ops", values: [0, 1, 0], metadata: { title: "Operations" } },
+    ]);
+
+    const result = await env.VECTORS.query([1, 0, 0], {
+      topK: 1,
+      filter: { title: "Intro" },
+      returnMetadata: true,
+    });
+
+    return Response.json({
+      provider: env.VECTORS.provider.kind,
+      matches: result.matches,
+    });
+  },
+};
+```
+
+`query` takes the vector array first and an options object second. It does not take a single `{ vector }` object as its only argument.
+
+Run the node:
+
+```bash
+peren dev fleet.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```bash
+curl -s http://127.0.0.1:54321/
+```
+
+## Methods
+
+| Method | Arguments | Result |
+| --- | --- | --- |
+| `upsert(vectors)` | array of `{ id, values, metadata? }` | `{ count }` |
+| `query(vector, options)` | number array, then `{ topK?, filter?, returnMetadata?, returnValues?, namespace? }` | `{ matches, count }` |
+| `getByIds(ids)` | id array | record array |
+| `deleteByIds(ids)` | id array | `{ count }` |
+
+Local query scores with cosine similarity. Dimension mismatches throw `TypeError: vector dimensions must match`.
+
+## Success
+
+The response includes `provider: "local"` and a `matches` array. The highest-scoring match for `[1, 0, 0]` with `filter: { title: "Intro" }` is `intro`.
+
+## Failure
+
+Local storage failures surface as binding errors on the request. External providers fail when their URL is unreachable or when a required API key environment variable is missing at process start.
+
+## HTTP
+
+```toml
+[services.bindings.VECTORS]
+type = "vectorize"
+endpoint = "articles"
+credential_scope = "vectors"
+
+[services.bindings.VECTORS.provider]
+kind = "http"
+url = "https://vectors.example"
+token_env = "VECTOR_API_TOKEN"
+```
+
+`url` is required. Optional `token_env` becomes a `Bearer` authorization header when set. Peren posts to `/upsert`, `/query`, `/get`, and `/delete` on that URL.
+
+## Qdrant
+
+```toml
+[services.bindings.VECTORS]
+type = "vectorize"
+endpoint = "articles"
+credential_scope = "vectors"
+
+[services.bindings.VECTORS.provider]
+kind = "qdrant"
+url = "https://qdrant.example"
+collection = "articles"
+api_key_env = "QDRANT_API_KEY"
+```
+
+`url` and `collection` are required. Optional `api_key_env` becomes an `api-key` header when set.
+
+## Pinecone
+
+```toml
+[services.bindings.VECTORS]
+type = "vectorize"
+endpoint = "articles"
+credential_scope = "vectors"
+
+[services.bindings.VECTORS.provider]
+kind = "pinecone"
+url = "https://articles.svc.pinecone.io"
+index = "articles"
+namespace = "default"
+api_key_env = "PINECONE_API_KEY"
+```
+
+`url`, `index`, and `api_key_env` are required. Optional `namespace` scopes upsert, query, fetch, and delete. Missing `PINECONE_API_KEY` fails the process before listeners open.
+
+## Weaviate
+
+```toml
+[services.bindings.VECTORS]
+type = "vectorize"
+endpoint = "Article"
+credential_scope = "vectors"
+
+[services.bindings.VECTORS.provider]
+kind = "weaviate"
+url = "https://weaviate.example"
+class_name = "Article"
+api_key_env = "WEAVIATE_API_KEY"
+```
+
+`url` and `class_name` are required. Optional `api_key_env` becomes an `Api-Key` header when set.
+
+## Related
+
+- [AI](/docs/bindings/ai/)
+- [Credentials and secrets](/docs/security/credentials/)
+- [Provider selection](/docs/bindings/providers/)

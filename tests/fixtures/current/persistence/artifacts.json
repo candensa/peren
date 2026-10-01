@@ -1,0 +1,18 @@
+{
+    "snapshot.sqlite": {
+        "bytes": 36864,
+        "sha256": "2b6a3a0b0c8ecade6b5b6a5319a95b68ff67ed9d729f131f1c7fb2685ba76b26"
+    },
+    "wal.bin": {
+        "bytes": 32992,
+        "sha256": "29a33c0bcaaf55d16777fb195875d467d53aa9ddc4939c4225bbfd83eaaa0901"
+    },
+    "restore.sqlite": {
+        "bytes": 36864,
+        "sha256": "2b6a3a0b0c8ecade6b5b6a5319a95b68ff67ed9d729f131f1c7fb2685ba76b26"
+    },
+    "restore.sqlite-wal": {
+        "bytes": 32992,
+        "sha256": "29a33c0bcaaf55d16777fb195875d467d53aa9ddc4939c4225bbfd83eaaa0901"
+    }
+}

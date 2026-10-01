@@ -1,0 +1,34 @@
+---
+title: "HTTP API example"
+description: "A minimal Worker that returns JSON for the request path."
+---
+
+Create `worker.js`:
+
+```js
+export default {
+  async fetch(request) {
+    return Response.json({ path: new URL(request.url).pathname });
+  },
+};
+```
+
+Create a fleet file with one service and one public socket, for example after `peren init`, then run:
+
+```sh
+peren serve fleet.toml
+```
+
+In another terminal:
+
+```sh
+curl http://127.0.0.1:8080/orders
+```
+
+The response body is:
+
+```json
+{"path":"/orders"}
+```
+
+For the full first-run path, including certificates and durable state, use [Quickstart](/docs/start/quickstart/) and [Build your first Durable Object](/docs/start/durable/).

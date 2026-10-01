@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 328" role="img" aria-labelledby="title">
+<title id="title">scheduled runs on the default export.</title>
+<defs>
+  <marker id="scheduled-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="scheduled-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="840" height="328" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="24" width="284" height="280" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">TRIGGERS</text>
+<rect x="392" y="24" width="424" height="280" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="408" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">DEFAULT EXPORT</text>
+<path d="M 276.0 108.0 L 424.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#scheduled-end)"/>
+<path d="M 276.0 244.0 L 424.0 244.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#scheduled-end)"/>
+<rect x="56" y="80" width="220" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="166" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">cron trigger</text>
+<rect x="56" y="216" width="220" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="166" y="249.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">public socket</text>
+<rect x="424" y="80" width="360" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="604" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">scheduled(event, env, ctx)</text>
+<rect x="424" y="216" width="320" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="584" y="249.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">fetch(request, env, ctx)</text>
+</svg>

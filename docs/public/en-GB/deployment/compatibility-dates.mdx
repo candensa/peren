@@ -1,0 +1,61 @@
+---
+title: "Compatibility dates and flags"
+description: "How Peren stores compatibility_date and which compatibility_flags pass or fail at process start."
+---
+
+`compatibility_date` is a required service field. Peren stores it and checks that it is a valid `YYYY-MM-DD` calendar date. Peren does not implement Cloudflare's compatibility-date flag calendar. Changing the date does not flip Cloudflare feature gates inside the isolate.
+
+`compatibility_flags` is an optional list of strings on the same service. Config parse accepts any string list after the date format check. Flag meaning is resolved when the node builds providers, before listeners open.
+
+## What the date does
+
+| Step | Behavior |
+| --- | --- |
+| Config validation | Rejects a date that is not `YYYY-MM-DD`. |
+| Process start | Parses the same date again into an internal compatibility record. |
+| Runtime effect | Node compatibility mode is always disabled. The date is retained; it does not enable Cloudflare-dated APIs. |
+
+## Flags that pass resolution
+
+These flags are accepted. They do not change Node compatibility mode:
+
+- `no_nodejs_compat`
+- `no_nodejs_compat_v2`
+
+Duplicates of any flag fail resolution.
+
+## Flags that fail resolution
+
+These names are recognized and refused as not implemented:
+
+- `nodejs_compat`
+- `nodejs_compat_v2`
+- `nodejs_als`
+- `durable_object_fetch_requires_full_url`
+- `streams_enable_constructors`
+
+Any other flag name fails as unknown.
+
+When resolution fails, provider construction fails and the process does not open listeners. Remove or replace the flag, then start again.
+
+## Migration versus runtime
+
+`peren migrate` uses a separate Wrangler flag table. It can accept some of the names above with partial-support notices, or refuse unknown flags during import. A fragment that migrates cleanly can still fail at process start if the runtime resolver refuses the flag. Prefer empty `compatibility_flags` unless you need `no_nodejs_compat` or `no_nodejs_compat_v2`.
+
+See [Migration overview](/docs/migrate/overview/) and [Migrate from Cloudflare Workers](/docs/deployment/cloudflare/).
+
+## Example
+
+```toml
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["no_nodejs_compat"]
+```
+
+## Related
+
+- [Unsupported and refused behavior](/docs/deployment/unsupported/)
+- [Compatibility and provider requirements](/docs/deployment/compatibility/)
+- [Fleet configuration](/docs/deployment/config/)

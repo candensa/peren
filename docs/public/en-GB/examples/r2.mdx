@@ -1,0 +1,107 @@
+---
+title: "R2 example"
+description: "Put and get an object through a memory R2 bucket binding."
+---
+
+This tutorial builds a Worker that stores an object in a memory R2 bucket and returns the body on GET.
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- An empty project directory
+
+## Create the files
+
+Create `worker.js`:
+
+```js
+export default {
+  async fetch(request, env) {
+    const key = new URL(request.url).pathname.slice(1) || "message";
+    if (request.method === "PUT") {
+      await env.BUCKET.put(key, request.body, {
+        customMetadata: { uploadedBy: "example" },
+      });
+      return new Response(null, { status: 204 });
+    }
+    const object = await env.BUCKET.get(key);
+    if (object === null) {
+      return Response.json(
+        { provider: env.BUCKET.provider.kind, found: false },
+        { status: 404 },
+      );
+    }
+    return new Response(object.body, {
+      headers: {
+        "x-peren-r2-provider": env.BUCKET.provider.kind,
+        "x-peren-r2-owner": object.customMetadata.uploadedBy ?? "",
+      },
+    });
+  },
+};
+```
+
+Create `peren.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.BUCKET]
+type = "r2_bucket"
+endpoint = "memory://demo"
+bucket = "demo"
+credential_scope = "demo"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+An endpoint that starts with `memory://` uses an in-process store. No access keys are required.
+
+## Run
+
+```sh
+peren devcert ./certs
+peren dev peren.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for the session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```sh
+curl -X PUT http://127.0.0.1:54321/message --data "hello"
+curl -i http://127.0.0.1:54321/message
+```
+
+PUT returns status `204` with an empty body. GET returns body `hello` with headers that include `x-peren-r2-provider: memory` and `x-peren-r2-owner: example`. Memory objects do not survive process restart.
+
+## Failure
+
+A GET for a key that was never stored returns status `404` and:
+
+```json
+{"provider":"memory","found":false}
+```
+
+Put the object first, or correct the path segment used as the key.
+
+## Next
+
+S3 credentials, list and delete, and provider differences: [R2](/docs/bindings/r2/).

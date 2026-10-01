@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1112 388" role="img" aria-labelledby="title">
+<title id="title">The bucket record names the owner.</title>
+<defs>
+  <marker id="architecture-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="architecture-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="1112" height="388" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="40" width="216" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="64" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">PUBLIC PATH</text>
+<rect x="268" y="40" width="464" height="324" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="284" y="64" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">THIS NODE</text>
+<rect x="776" y="24" width="312" height="320" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="792" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">THE BUCKET</text>
+<path d="M 208.0 124.0 L 300.0 124.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#architecture-end)"/>
+<path d="M 468.0 124.0 L 504.0 124.0 L 504.0 164.0 L 540.0 164.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#architecture-end)"/>
+<path d="M 468.0 304.0 L 620.0 304.0 L 620.0 192.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#architecture-end)"/>
+<rect x="481.0" y="311.0" width="171.6" height="22" rx="6" fill="#fbfaf7"/>
+<text x="566.8" y="326.0" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">not the public socket</text>
+<path d="M 700.0 164.0 L 754.0 164.0 L 754.0 108.0 L 808.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#architecture-end)"/>
+<rect x="705.4" y="125.0" width="141.2" height="22" rx="6" fill="#fbfaf7"/>
+<text x="776.0" y="140.0" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">conditional write</text>
+<path d="M 620.0 192.0 L 620.0 238.0 L 808.0 238.0 L 808.0 284.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#architecture-end)"/>
+<rect x="569.4" y="197.1" width="65.2" height="22" rx="6" fill="#fbfaf7"/>
+<text x="602.0" y="212.1" text-anchor="middle" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="500">publish</text>
+<rect x="56" y="96" width="152" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="132" y="129.0" text-anchor="middle" fill="#141414" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="13" font-weight="500">Client</text>
+<rect x="300" y="96" width="168" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="384" y="129.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">public socket</text>
+<rect x="300" y="276" width="168" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="384" y="309.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">peer listen</text>
+<rect x="540" y="136" width="160" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="620" y="169.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">cell</text>
+<rect x="808" y="80" width="248" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="932" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">owner record</text>
+<rect x="808" y="256" width="248" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="932" y="289.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">snapshot / WAL</text>
+</svg>

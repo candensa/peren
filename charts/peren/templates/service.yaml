@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "peren.fullname" . }}
+  labels:
+    {{- include "peren.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "peren.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: peer
+      port: {{ .Values.service.peerPort }}
+      targetPort: peer
+    - name: http
+      port: {{ .Values.service.publicPort }}
+      targetPort: http

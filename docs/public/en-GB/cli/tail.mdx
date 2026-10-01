@@ -1,0 +1,59 @@
+---
+title: "Tail service events"
+description: "Read the local Peren tail event log for a service with peren tail."
+---
+
+`peren tail` reads recent service events from a node. Filter by service or severity to find failed requests and inspect their status, outcome, and wall time. `peren logs` is the same command under another name.
+
+## What is written
+
+The running process appends events to `$PEREN_DATA_DIR/tail/events.jsonl` (`./data/tail/events.jsonl` when `PEREN_DATA_DIR` is unset).
+
+Request events record HTTP dispatch: method, path, status, outcome, and wall time in milliseconds.
+
+Console events record Worker calls to `console.debug`, `console.log`, `console.info`, `console.warn`, and `console.error`, with the severity preserved as `Debug`, `Info`, `Warn`, or `Error`.
+
+## Command
+
+```sh
+peren tail <config> --service <name> [--level log|warn|error] [--node <node>]
+```
+
+`--service` is required and must name a service in the fleet config. There is no `--kind` flag. `--node` is accepted and does not change the result.
+
+The command loads the event file, filters by service and optional level, prints matching lines, and exits. It does not block waiting for new lines.
+
+```sh
+peren tail fleet.toml --service api
+```
+
+## Filter by level
+
+| `--level` | Request events | Console events |
+| --- | --- | --- |
+| omitted or `log` | all | all |
+| `warn` | status ≥ 400 | `Warn` and `Error` |
+| `error` | status ≥ 500 | `Error` only |
+
+```sh
+peren tail fleet.toml --service api --level error
+```
+
+Representative output:
+
+```text
+api POST /checkout status=500 outcome=error wall_time_ms=37
+api console Error checkout failed
+```
+
+## What `--json` is not
+
+`peren tail` does not accept `--json`. The printed lines are for you to read. They can change between releases. The file on disk is JSONL. The command does not print that JSON.
+
+## Difference from `peren logs`
+
+None. `peren logs` and `peren tail` read the same file, take the same flags, and print the same lines. Pick one name and keep it. See [peren logs](/docs/cli/logs/) and the [CLI reference](/docs/reference/cli/).
+
+## Failure
+
+Exits `2` if `--service` is omitted. Exits `1` if the service is absent from config, or if the event log cannot be read after a non-missing I/O error. A missing event file yields no lines and exit `0`.

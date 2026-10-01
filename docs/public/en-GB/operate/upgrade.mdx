@@ -1,0 +1,54 @@
+---
+title: "Plan upgrades"
+description: "Check storage, then print an upgrade sequence without running it."
+---
+
+Check that the fleet file and bucket still work, then print the steps for replacing the Peren binary. Neither command upgrades the process for you.
+
+## Upgrade check
+
+```sh
+peren upgrade check peren.toml
+peren upgrade check peren.toml --target 0.1.1
+```
+
+The check tests the configured bucket. On success it prints the current binary version, the target (the current version when you omit `--target`), that storage passed, and the configured service and socket counts:
+
+```text
+upgrade check current=0.1.0 target=0.1.1 storage=true services=1 sockets=1
+```
+
+If the storage check fails, fix the bucket endpoint, credentials, or provider before you plan a production upgrade.
+
+## Upgrade plan
+
+```sh
+peren upgrade plan peren.toml --target 0.1.1
+```
+
+The plan reuses the check, then prints steps. It does not execute them:
+
+```text
+upgrade plan current=0.1.0 target=0.1.1 steps=5
+1. backup data directory
+2. drain one node at a time
+3. replace binary with target version
+4. run conformance storage
+5. run deploy health
+```
+
+## Operator sequence
+
+<Warning>
+`peren backup` copies `PEREN_DATA_DIR`. It is not a live consistent snapshot of a running process. Stop or quiesce writers when you need a consistent copy.
+</Warning>
+
+```sh
+peren backup peren.toml --output ./backup-before-upgrade
+peren upgrade check peren.toml --target 0.1.1
+peren upgrade plan peren.toml --target 0.1.1
+```
+
+Carry out drain, binary replacement, storage conformance, and deploy health with the corresponding commands. Registry drain and live peer drain are different paths; see [Drain a node](/docs/operate/drain/).
+
+Related: [Operations overview](/docs/operate/overview/), [Deploy and roll back](/docs/deployment/deploy/), [Degraded operation](/docs/operations/degraded/).

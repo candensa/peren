@@ -1,0 +1,87 @@
+---
+title: "Runtime API reference"
+description: "Worker handlers, request context and enforced runtime limits."
+---
+
+What Peren calls on a Worker, what `ctx` contains, and which limits apply. For the programming model, see [Workers](/docs/build/workers/). For web globals, see [Web platform APIs](/docs/concepts/web/).
+
+## Entry
+
+Peren loads `export default` as the Worker entry. The entry module must be JavaScript or CommonJS. A `.wasm` path as the entry is refused. Additional modules may be JavaScript, CommonJS (`.cjs`) or WebAssembly (`.wasm`).
+
+If the default export has no `fetch` function and no fetch listener is registered, isolate load fails with a TypeError requiring `fetch`.
+
+## Handlers
+
+| Handler | Signature | Notes |
+| --- | --- | --- |
+| `fetch` | `(request, env, ctx) => Response \| Promise<Response>` | Required for ordinary HTTP. Must return a `Response`. |
+| `scheduled` | `(event, env, ctx) => unknown` | Cron dispatch. `event.cron`, `event.scheduledTime`. |
+| `queue` | `(batch, env, ctx) => unknown` | Queue consumer dispatch. |
+| `alarm` | `(env, {}) => unknown` | Alarm dispatch. Second argument is an empty object. |
+| `tail` | `(events, env, ctx) => unknown` | Tail consumer dispatch. |
+| `workflow` | `(event, step, env, ctx) => unknown` | Workflow step dispatch. |
+| `activity` | `(event, env, ctx) => unknown` | Required when workflow activity dispatch runs. |
+| `webSocketMessage` | `(socket, message, env, ctx) => unknown` | After an upgraded WebSocket receives a message. |
+| `webSocketClose` | `(socket, code, reason, wasClean, env, ctx) => unknown` | After an upgraded WebSocket closes. |
+
+Listener fallbacks via `addEventListener` exist for `fetch`, `scheduled`, `queue`, `tail`, `webSocketMessage` and `webSocketClose` when the corresponding default-export method is absent.
+
+### RPC
+
+Requests with header `x-peren-rpc-method` call that method name on the default export with `args` from the JSON body (`{ "args": [...] }`). Missing methods return status 404. Thrown errors return status 500. Success returns `{ ok: true, value }` with content type `application/vnd.peren.rpc+json`.
+
+## Context
+
+```js
+ctx.waitUntil(promise);
+```
+
+| Member | Type | Behavior |
+| --- | --- | --- |
+| `waitUntil` | `(promise) => void` | Registers work drained before the invocation finishes. |
+
+`ctx` has no other members on the live dispatch path.
+
+## Environment
+
+| Source | Shape on `env` |
+| --- | --- |
+| `[services.vars]` | string |
+| `[services.secrets]` / secrets-store refs | string |
+| Hydrated bindings | binding objects by configured name |
+
+Peren does not leave internal binding or cache objects on `env`. The global `caches` object comes from `[cache]`, not from `env`. Service assets are served by the node for matching static paths and are not placed on `env`.
+
+## Limits
+
+Defaults from fleet `[limits]`:
+
+| Field | Type | Default | Live HTTP path |
+| --- | --- | --- | --- |
+| `max_request_body_bytes` | u64 | 33554432 | Enforced for request and response body size |
+| `max_heap_bytes` | u64 | 134217728 | Enforced as isolate heap limit |
+| `max_execution_time_ms` | u64 | 30000 | Enforced as wall-clock watchdog |
+| `max_subrequests_per_invocation` | u32 | 10000 | Enforced on requests the node makes for the Worker |
+| `max_isolates` | usize | 256 | Enforced as process admission capacity |
+| `max_cpu_time_ms` | u64 | 30000 | Present in config; not applied when building live HTTP invocation limits |
+| `isolate_fair_share_percent` | u8 | 25 | Process scheduling share |
+| `checkpoint_threshold_bytes` | u64 | 4194304 | Cell checkpoint threshold |
+| `cron_retry_base_ms` | u64 | 2000 | Cron retry base delay |
+| `cron_retry_max_attempts` | u32 | 6 | Cron retry attempts |
+| `cron_retry_max_backoff_ms` | u64 | 64000 | Cron retry backoff ceiling |
+| `max_steps_per_instance` | u64 | 100000 | Workflow step ceiling |
+
+Services may override `max_heap_bytes`, `max_execution_time_ms`, `max_subrequests_per_invocation`, `max_cpu_time_ms`, `isolate_fair_share_percent`, `checkpoint_threshold_bytes` and `max_steps_per_instance`. Override of `max_cpu_time_ms` does not change the live HTTP path until the node wires that field into invocation limits.
+
+When a request or response exceeds `max_request_body_bytes`, Peren refuses the body. When heap or wall-clock execution limits trip, Peren terminates the isolate work for that invocation.
+
+## Compatibility flags
+
+Config validation accepts `no_nodejs_compat` and `no_nodejs_compat_v2`. Flags `nodejs_compat`, `nodejs_compat_v2`, `nodejs_als`, `durable_object_fetch_requires_full_url` and `streams_enable_constructors` are recognized and refused. Unknown flags are refused.
+
+## Related
+
+- [Workers](/docs/build/workers/)
+- [Web platform APIs](/docs/concepts/web/)
+- [Configuration reference](/docs/reference/configuration/)

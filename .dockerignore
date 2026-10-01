@@ -1,0 +1,6 @@
+target
+data
+certs
+node_modules
+.git
+.env

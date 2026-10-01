@@ -1,0 +1,74 @@
+---
+title: "Durable Objects in Peren"
+description: "Cells, namespace addressing, storage values and where SQL belongs."
+---
+
+A cell is one routed stateful object identity. It has one current owner, one SQLite-backed state database and recovery records published under the current ownership epoch. Use a cell when the application needs a single writer, ordered mutation and state that can survive process restart when the bucket retains published records.
+
+## Namespace addressing
+
+A Durable Object namespace binding exposes identity helpers on `env`:
+
+- `idFromName(name)` — stable id derived from a string name
+- `idFromString(id)` — rebuilds an id previously produced by the same namespace
+- `newUniqueId()` — creates a new unique id
+- `get(id)` — returns a stub for that id
+
+The Worker that holds the binding calls `stub.fetch` to reach the object service mapped to the namespace's `class_name`. That object service runs its own Worker bundle. When the module exports a class with that name, the cell constructs it and calls `fetch`. Otherwise the cell calls `export default`. A public socket on the same service still calls `export default`.
+
+```js
+export default {
+  fetch(request, env) {
+    const id = env.COUNTER.idFromName("main");
+    return env.COUNTER.get(id).fetch(request);
+  },
+};
+```
+
+Configure the namespace on the caller and a Durable Object entrypoint on the object service:
+
+```toml
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.COUNTER]
+type = "durable_object_namespace"
+class_name = "Counter"
+unique_key = "counter"
+
+[[services]]
+name = "counter"
+worker_bundle_path = "counter.js"
+compatibility_date = "2026-01-01"
+
+[services.entrypoint]
+kind = "durable_object"
+class_name = "Counter"
+unique_key = "counter"
+id_from = { source = "first_path_segment" }
+```
+
+`class_name` links the namespace to that service. If `counter.js` exports `class Counter`, the cell constructs `Counter` and calls its `fetch`. The constructor receives a state object whose `storage.get` and `storage.put` accept JSON values and `Uint8Array`. If the class is not exported, the cell calls `export default` on `counter.js`.
+
+## Storage values
+
+Inside a cell, application state goes through `Peren.storage`:
+
+- `get`, `delete` and `deleteAll` for reads and deletes
+- `transaction` and `mutation` for writes
+
+Values passed to `put` must be strings or `Uint8Array` instances. Other types throw `TypeError`. Reads return bytes or `undefined`. Write through `transaction` or `mutation`; a `mutation` id stores the outcome so a repeated id returns the recorded result without running the callback again.
+
+`Peren.storage` has no `setAlarm`. SQL for application tables is not part of this storage object.
+
+## SQL belongs on D1
+
+Use a D1 binding when the Worker needs `prepare`, `exec`, `batch`, `run`, `first`, `all` or `raw`. See [D1 and native SQLite](/docs/bindings/d1/).
+
+## When not to use a cell
+
+Do not use cells as a general cross-fleet analytical database or for multi-object transactions. Each cell is one identity with one writer. Cross-cell consistency is the application's responsibility.
+
+Read [Durability](/docs/concepts/durability/) for publish behavior and [Recovery after node loss](/docs/state/recovery/) for restart verification.

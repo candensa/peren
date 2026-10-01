@@ -1,0 +1,151 @@
+---
+title: "Cache API"
+description: "Configure the fleet cache provider and call caches.open, match, put, and delete from a Worker."
+---
+
+The Cache API stores HTTP responses for later `match` lookups. Configure it with the fleet-level `[cache]` table. Workers call the global `caches` object. There is no `env` cache binding such as `env.PAGE_CACHE`.
+
+Use cache for derived HTTP responses. Use KV or D1 when the value is source-of-truth application state.
+
+## Configure memory cache
+
+Create `peren.toml` and `worker.js`. Memory is the default when `[cache]` is omitted; declare it explicitly for clarity.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[cache]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+```js
+export default {
+  async fetch(request) {
+    const cache = await caches.open("pages");
+    const cached = await cache.match(request);
+    if (cached) {
+      return cached;
+    }
+    const response = Response.json({
+      source: "origin",
+      provider: cache.provider.kind,
+    });
+    await cache.put(request, response.clone());
+    return response;
+  },
+};
+```
+
+## Run and verify
+
+```sh
+peren devcert ./certs
+peren dev peren.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port.
+
+```sh
+curl http://127.0.0.1:54321/
+curl http://127.0.0.1:54321/
+```
+
+The first response is built by the Worker. The second response is served from `caches` with the same JSON body. `"provider":"memory"` identifies the fleet cache provider. Memory cache does not survive process restart.
+
+## Methods
+
+| API | Behavior |
+| --- | --- |
+| `caches.default` | The default named cache. |
+| `caches.open(name)` | Opens a named cache. Empty names throw `TypeError`. |
+| `cache.match(request, options?)` | Returns a `Response` or `undefined`. |
+| `cache.put(request, response)` | Stores the response for a GET request. |
+| `cache.delete(request, options?)` | Removes a matching entry and returns whether a delete occurred. |
+
+`put` refuses:
+
+- non-GET request methods → `TypeError("Cache.put request method must be GET")`
+- status `206` → `TypeError("Cache.put does not accept partial responses")`
+- `Vary: *` → `TypeError("Cache.put does not accept Vary: * responses")`
+
+## Other cache providers
+
+These fragments belong at the fleet root beside `[node]` and `[bucket]`, not under `[services.bindings]`.
+
+### KV-backed cache
+
+```toml
+[cache]
+kind = "kv"
+namespace = "page-cache"
+```
+
+### Redis-backed cache
+
+Set `REDIS_URL` before starting the node.
+
+```toml
+[cache]
+kind = "redis"
+url_env = "REDIS_URL"
+```
+
+### Bucket-backed cache
+
+```toml
+[cache]
+kind = "bucket"
+endpoint = "https://s3.example.com"
+bucket = "peren-cache"
+prefix = "cache/"
+access_key_id_env = "CACHE_ACCESS_KEY_ID"
+secret_access_key_env = "CACHE_SECRET_ACCESS_KEY"
+```
+
+Missing Redis or bucket credential environment variables refuse process start:
+
+```text
+required environment variable "REDIS_URL" is not set
+```
+
+Worker calls stay on `caches`. `cache.provider.kind` reports `kv`, `redis`, or `bucket`.
+
+## One real failure
+
+```js
+await cache.put(
+  new Request("http://127.0.0.1:8080/", { method: "POST" }),
+  new Response("no"),
+);
+```
+
+The isolate throws:
+
+```text
+Cache.put request method must be GET
+```
+
+Store only GET responses, or change the request method before calling `put`.
+
+Related: [Provider selection](/docs/bindings/providers/), [KV](/docs/bindings/kv/), [Bindings overview](/docs/bindings/overview/).

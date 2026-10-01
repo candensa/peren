@@ -1,0 +1,55 @@
+---
+title: "Degraded operation"
+description: "Diagnose storage, peer, and cell failures without assuming automatic migration."
+---
+
+Symptom: requests fail, readiness flips, `peren conformance storage` fails, or a cell stops accepting work after a publish error.
+
+Peren refuses unsafe work on the affected path. It does not automatically migrate cells to another node as part of that refusal.
+
+## Storage publication failure on a cell
+
+When a cell cannot publish durable state, the cell moves to `Draining` and further dispatch on that cell is refused. When ownership verification fails after publication or during lease checks, the cell moves to `Fenced` and further dispatch is refused.
+
+What still runs:
+
+- other cells on the same node that remain `Active`;
+- listeners that are still ready;
+- Workers and bindings that do not need the failed cell.
+
+What stops on the affected cell:
+
+- new dispatch while the cell is `Draining` or `Fenced`.
+
+There is no automatic cell migration from this failure path. The write that failed to publish is not durable. Earlier published generations remain subject to the normal ownership and recovery path; the operator must restore storage health before expecting new commits on that cell.
+
+## Operator checks
+
+```sh
+peren node health peren.toml
+peren status peren.toml
+peren diagnose peren.toml
+peren conformance storage peren.toml
+peren deploy health peren.toml --service api
+curl -sS http://127.0.0.1:8080/readyz
+curl -sS http://127.0.0.1:8080/metrics
+peren tail peren.toml --service api --level error
+```
+
+Interpret results in this order:
+
+1. `/readyz` and `peren node health` show whether listeners still accept work.
+2. `peren conformance storage` shows whether the bucket still satisfies conditional writes and ranged reads.
+3. `peren diagnose` narrows config and local data problems.
+4. Deployment health shows digest drift between the registry and files on disk.
+5. Tail and metrics show request failures and admission refusals.
+
+## Node unavailable
+
+If a process is gone, do not delete its local disk until shared durable state exists and you accept that any unpublished local work is lost. Use the peer control report's `disk_removal_safe` field only after a live peer drain when the process is still reachable. Registry drain alone does not move cells. See [Drain a node](/docs/operate/drain/).
+
+## Planned maintenance
+
+Drain live admission on the peer listener before stopping the process. Record registry drain when membership state must show draining. Replace or restart the node, then re-run storage conformance and deploy health before returning traffic.
+
+Related: [Operations overview](/docs/operate/overview/), [Observability](/docs/operations/observability/), [Drain a node](/docs/operate/drain/).

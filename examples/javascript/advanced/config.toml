@@ -1,0 +1,65 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000113"
+advertise_addr = "127.0.0.1:7113"
+listen = "127.0.0.1:7113"
+region = "local"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[limits]
+max_request_body_bytes = 16777216
+max_heap_bytes = 134217728
+max_subrequests_per_invocation = 1000
+
+[queues.consumer_defaults]
+max_batch_size = 25
+max_batch_timeout_secs = 5
+max_retries = 5
+max_concurrency = 4
+dead_letter_queue = "dead"
+
+[[tenants]]
+id = "acme"
+cell_quota = 1000
+
+[[projects]]
+id = "dashboard"
+tenant_id = "acme"
+
+[[services]]
+name = "advanced"
+worker_bundle_path = "examples/javascript/advanced/worker.js"
+compatibility_date = "2026-01-01"
+tenant_id = "acme"
+project_id = "dashboard"
+placement_regions = ["local"]
+
+[services.bindings.DB]
+type = "d1_database"
+database_name = "advanced"
+unique_key = "advanced"
+
+[services.bindings.CACHE]
+type = "kv"
+namespace = "advanced"
+unique_key = "advanced"
+
+[services.bindings.JOBS]
+type = "queue"
+queue_name = "jobs"
+
+[services.bindings.LIMIT]
+type = "rate_limiter"
+limit = 100
+period_secs = 60
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8113"
+service = "advanced"

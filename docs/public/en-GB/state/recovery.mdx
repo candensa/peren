@@ -1,0 +1,42 @@
+---
+title: "Recovery after node loss"
+description: "Verify cell state after restart and understand ownership fencing during takeover."
+---
+
+Recovery restores a cell's SQLite database from snapshot and WAL records in the bucket, then continues under a valid ownership lease. There is no `peren cell inspect` command. Confirm recovery with an HTTP response that returns the expected state after restart. For a production bucket, run `peren conformance storage` first.
+
+<SystemDiagram name="recovery" />
+
+## Symptom
+
+A process stops or restarts. Later requests miss earlier mutations, fail while acquiring ownership, or return errors while the bucket is unreachable.
+
+## Checks
+
+1. Confirm the fleet file still points at the same bucket path or endpoint the node used when it published state.
+2. For a production or multi-node bucket, run storage conformance before relying on recovery:
+
+```sh
+peren conformance storage fleet.toml
+```
+
+The command checks conditional writes and ranged reads. If it fails, do not use that provider for recovery.
+
+3. Confirm the Worker bundle and Durable Object namespace configuration still address the same cell identity you expect.
+4. Send the same HTTP request that previously mutated state and compare the response body to the last known value.
+
+## Restart on one node with a file bucket
+
+On a single node using `[bucket] kind = "file"`, stop the process, start it again against the same `path`, and repeat the request. Peren acquires ownership, restores published replica bytes into the cell's SQLite file when records exist, then runs the Worker. A matching response proves local restart recovery for that cell.
+
+Keep the data directory and file-bucket path intact across the restart. Deleting either removes the local database or the published records the next start needs.
+
+## Peer takeover
+
+After a dispatch finishes, the owning node releases ownership so the owner field is clear. Another node that shares the same bucket can then acquire the cell, restore published snapshot and WAL records and serve the next request.
+
+Ownership recovery that replaces a still-recorded owner advances the ownership epoch and fences the previous lease. A node holding the older epoch cannot publish or commit further state for that cell. The live request path acquires when no owner is recorded; it does not automatically run dead-owner recovery when a previous owner is still present. There is no operator CLI that moves cells between nodes.
+
+If acquisition fails after a crash mid-dispatch, check whether the ownership record still names an owner, whether the bucket accepts conditional writes and whether published replica objects for the cell are readable. Fix storage reachability and ownership before expecting a peer to serve the cell.
+
+Read [Durability](/docs/concepts/durability/) for publish and fencing details and [Placement](/docs/concepts/placement/) for ownership versus preference.

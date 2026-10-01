@@ -1,0 +1,67 @@
+---
+title: "Unsupported and refused behavior"
+description: "Refused and bounded Peren behaviors to check before you implement against Cloudflare assumptions."
+---
+
+Read this page before you port Cloudflare Workers habits into Peren. Each item is refused or limited in this build. The linked page shows what to use instead.
+
+## Data and restore
+
+| Behavior | What happens | Where it is explained |
+| --- | --- | --- |
+| External D1 backend | Config may parse `backend = { kind = "external", ... }`. Query and operator D1 commands refuse it at query time. Use `native_sqlite` or `turso`. | [D1](/docs/bindings/d1/) |
+| `peren d1 restore` | The command exits with an operational error: native D1 has no time-travel snapshots or bookmarks. | [CLI reference](/docs/reference/cli/) |
+
+## Observability exporters
+
+| Behavior | What happens | Where it is explained |
+| --- | --- | --- |
+| `[otlp]`, `[logpush]` | Fleet config validation fails and the process does not start. | [Observability](/docs/operations/observability/) |
+
+`/healthz`, `/readyz`, `/metrics`, `peren logs`, and `peren tail` remain available. See [Ports and endpoints](/docs/reference/ports/) and [Logs and tail](/docs/reference/logs/).
+
+## Containers
+
+| Behavior | What happens | Where it is explained |
+| --- | --- | --- |
+| `exec`, `start`, `stop`, `destroy`, `readFile`, `writeFile` | Each call throws. `fetch` to the configured local port is the supported path. | [Containers](/docs/bindings/containers/) |
+
+## KV
+
+| Behavior | What happens | Where it is explained |
+| --- | --- | --- |
+| `compareAndSet` on Redis or bucket KV | Throws `Error("KV compareAndSet is only supported by native KV")`. Native KV supports the method. | [KV](/docs/bindings/kv/) |
+
+## Limits and rollout
+
+| Behavior | What happens | Where it is explained |
+| --- | --- | --- |
+| `limits.max_cpu_time_ms` | Stored in config. Not applied on the live HTTP path. Body, heap, wall time, subrequests, and `max_isolates` are enforced. | [Limits](/docs/reference/limits/) |
+| Deploy `--percent` | Recorded on the generation. Does not split traffic across generations. The running process keeps the bundles loaded at start. | [Deploy and roll back](/docs/deployment/deploy/) |
+
+## Fleet membership and tenancy
+
+| Behavior | What happens | Where it is explained |
+| --- | --- | --- |
+| `peren node drain` | Writes `draining` in the local fleet registry. Does not move cells. Does not change admission on a running process. Live refusal of new work is `POST /control/v1/node/drain` on the peer listener. | [Drain a node](/docs/operate/drain/) |
+| `peren tenant revoke` | Writes an active revocation in the tenant registry. A running isolate does not read that file to deny a request. | [Security model](/docs/security/overview/) |
+
+## Credentials and network
+
+| Behavior | What happens | Where it is explained |
+| --- | --- | --- |
+| SigV4 `instance_role`, `workload_identity`, `eks_pod_identity` | Read `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` from the process environment. Do not call IMDS, a pod-identity agent, or a workload-identity endpoint. | [AWS SigV4](/docs/bindings/sigv4/) |
+| Inbound peer listeners | Plain TCP. `[mtls]` paths are required in config and do not terminate inbound TLS. | [Ports and endpoints](/docs/reference/ports/), [Networking](/docs/deploy/networking/) |
+
+## Missing commands and APIs
+
+| Behavior | What happens | Where it is explained |
+| --- | --- | --- |
+| `peren cell inspect` | The command does not exist. Confirm recovery with an HTTP response after restart. Run `peren conformance storage` before production. | [Recovery after node loss](/docs/state/recovery/) |
+| `setAlarm` on the JS storage object | `Peren.storage` has no `setAlarm`. | [Durable Objects in Peren](/docs/state/objects/) |
+
+## Related
+
+- [Compatibility and provider requirements](/docs/deployment/compatibility/)
+- [Compatibility dates and flags](/docs/deployment/compatibility-dates/)
+- [Migration overview](/docs/migrate/overview/)

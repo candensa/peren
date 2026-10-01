@@ -1,0 +1,72 @@
+---
+title: "Web platform APIs"
+description: "What Peren exposes in the Worker isolate, and what it refuses."
+---
+
+Peren gives each Worker a fixed set of web globals and selected Node-compatible modules. Network, storage, and credentials leave the isolate only through bindings you declared.
+
+## Requests and responses
+
+`Request`, `Response`, `Headers`, `URL`, `URLSearchParams` and `URLPattern` are available. HTTP dispatch builds a `Request` from the inbound method, URL, headers and body, then requires `fetch` to return a `Response`.
+
+`FormData`, `Blob`, `File` and `FileReader` are supported for body construction and parsing.
+
+## Streams and encoding
+
+`ReadableStream`, `WritableStream`, `TransformStream`, `ByteLengthQueuingStrategy`, `CountQueuingStrategy`, `TextEncoder`, `TextDecoder`, `TextEncoderStream`, `TextDecoderStream`, `CompressionStream` and `DecompressionStream` are exposed. Gzip compression and decompression round-trips are supported.
+
+`structuredClone` deep-copies values that the isolate clone path accepts.
+
+## Timers and events
+
+`setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `setImmediate` and `clearImmediate` are available.
+
+`Event`, `EventTarget`, `MessageEvent`, `ProgressEvent`, `MessageChannel`, `MessagePort`, `BroadcastChannel` and `addEventListener` are available. Fetch, scheduled, queue and tail listener dispatch use the same listener registry.
+
+`AbortController` and `AbortSignal` cancel work that cooperates with abort.
+
+## Outbound fetch
+
+Global `fetch` and `Peren.fetch` use the same outbound allowlist. A Worker has no open network access. If the host is not allowed, the fetch fails.
+
+Configured `type = "outbound"` bindings expose `env.NAME.fetch` with an `allowed_hosts` list. A host outside that list throws `TypeError`. Redirect targets are not checked again after the first hop.
+
+Pass a client certificate with `fetch(url, { cf: { mtlsCertificate: env.NAME } })` when `type = "mtls_certificate"` is configured. The binding has no `fetch` method. Missing PEM environment variables fail the process before listeners open. The Worker cannot read the PEM.
+
+## Cache
+
+The global `caches` object comes from fleet `[cache]` configuration. It is not an `env` binding. `caches.default` and `caches.open` return `Cache` instances backed by the configured provider.
+
+## Web Crypto
+
+`crypto` and `CryptoKey` are partial.
+
+Supported operations include `getRandomValues`, `randomUUID`, SHA-1 and SHA-2 `subtle.digest`, HMAC, PBKDF2 and HKDF `deriveBits` / `deriveKey`, AES-GCM and AES-CBC for 128/192/256-bit keys, Ed25519, and ECDSA P-256 generate, import, export, sign and verify for the covered key paths.
+
+RSA, ECDH, portable private-key formats outside the tested paths, and the broader Web Crypto algorithm set are unsupported. Unsupported algorithms refuse with `NotSupportedError`.
+
+## WebSockets
+
+`WebSocket` and `WebSocketPair` are available. Pair accept, send, message and close behavior runs in the isolate. Node HTTP upgrade, frame bridging and Durable Object hibernation APIs are supported in the local Peren host model. Full Cloudflare edge WebSocketPair and hibernation parity outside that model is unsupported. See [WebSockets](/docs/build/websockets/).
+
+## Other globals
+
+Also present: `atob`, `btoa`, `console`, `navigator` (including `userAgent`), `performance`, `DOMException`, `NonRetryableError` and `EventSource` for `text/event-stream` responses on an allowed host.
+
+Binding constructor names such as `Ai`, `KvNamespace` and `DurableObjectNamespace` appear when the corresponding capability is hydrated. They are not Worker entrypoints.
+
+## Node-compatible modules
+
+Selected `node:` modules resolve inside the isolate. Compatibility flags `nodejs_compat`, `nodejs_compat_v2`, `nodejs_als`, `durable_object_fetch_requires_full_url` and `streams_enable_constructors` are recognized and refused at config validation. `no_nodejs_compat` and `no_nodejs_compat_v2` are accepted and leave Node compatibility disabled.
+
+Unsupported modules resolve to explicit refusal stubs, including `node:dns`, `node:dns/promises`, `node:fs`, `node:fs/promises`, `node:net` and other host-privileged surfaces marked unsupported in Peren's compatibility matrix. Partial modules expose a tested subset and refuse the rest.
+
+## Static assets
+
+When a service sets `assets.directory`, Peren serves matching files for `GET` and `HEAD` before calling the Worker, unless `run_worker_first` selects the Worker first. Assets are not hydrated onto `env`.
+
+## Related
+
+- [Workers](/docs/build/workers/)
+- [Runtime API reference](/docs/reference/runtime/)
+- [Bindings overview](/docs/bindings/overview/)

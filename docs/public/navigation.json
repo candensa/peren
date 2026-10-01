@@ -1,0 +1,208 @@
+{
+  "tabs": [
+    {
+      "id": "start",
+      "label": "Start",
+      "groups": [
+        {
+          "id": "learn",
+          "label": "Learn Peren",
+          "pages": [
+            "index",
+            "start",
+            "start/overview",
+            "start/install",
+            "start/quickstart",
+            "start/durable",
+            "start/production",
+            "glossary"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "build",
+      "label": "Build",
+      "groups": [
+        {
+          "id": "workers",
+          "label": "Workers",
+          "pages": [
+            "build/workers",
+            "build/modules",
+            "concepts/web",
+            "build/assets",
+            "build/scheduled",
+            "build/rpc",
+            "build/websockets",
+            "build/testing"
+          ]
+        },
+        {
+          "id": "state",
+          "label": "Durable state",
+          "pages": [
+            "concepts/architecture",
+            "state/objects",
+            "state/namespace",
+            "state/alarms",
+            "concepts/durability",
+            "state/recovery",
+            "concepts/placement"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bindings",
+      "label": "Bindings",
+      "groups": [
+        {
+          "id": "providers",
+          "label": "Providers",
+          "pages": [
+            "bindings/overview",
+            "bindings/providers",
+            "bindings/kv",
+            "bindings/d1",
+            "bindings/r2",
+            "bindings/queues",
+            "bindings/cache",
+            "bindings/ai",
+            "bindings/vector",
+            "bindings/service",
+            "bindings/workflows",
+            "bindings/rate-limiting",
+            "bindings/secrets",
+            "bindings/network",
+            "bindings/outbound",
+            "bindings/mtls",
+            "bindings/sigv4",
+            "bindings/hyperdrive",
+            "bindings/analytics",
+            "bindings/images",
+            "bindings/containers"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deploy",
+      "label": "Deploy",
+      "groups": [
+        {
+          "id": "deployment",
+          "label": "Deployment",
+          "pages": [
+            "deploy/overview",
+            "deployment/config",
+            "deploy/networking",
+            "deploy/kubernetes",
+            "deployment/deploy",
+            "deployment/compatibility",
+            "deployment/compatibility-dates",
+            "deployment/unsupported",
+            "deployment/cloudflare"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "operate",
+      "label": "Operate",
+      "groups": [
+        {
+          "id": "operations",
+          "label": "Operations",
+          "pages": [
+            "operate/overview",
+            "operations/observability",
+            "operate/drain",
+            "operate/add-node",
+            "operate/remove-node",
+            "operate/backup",
+            "operate/restore",
+            "operate/queues",
+            "operate/secrets",
+            "operate/upgrade",
+            "operate/runbooks",
+            "operations/degraded"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "security",
+      "label": "Security",
+      "groups": [
+        {
+          "id": "security",
+          "label": "Security",
+          "pages": [
+            "security/overview",
+            "security/isolation",
+            "security/credentials",
+            "security/network",
+            "security/tenants"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "migrate",
+      "label": "Migrate",
+      "groups": [
+        {
+          "id": "migration",
+          "label": "Migration",
+          "pages": [
+            "migrate/overview",
+            "migrate/bindings"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reference",
+      "label": "Reference",
+      "groups": [
+        {
+          "id": "reference",
+          "label": "Reference",
+          "pages": [
+            "reference/cli",
+            "reference/configuration",
+            "reference/runtime",
+            "reference/limits",
+            "reference/metrics",
+            "reference/ports",
+            "reference/logs",
+            "reference/errors",
+            "reference/exit-codes",
+            "cli/tail",
+            "cli/logs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "examples",
+      "label": "Examples",
+      "groups": [
+        {
+          "id": "examples",
+          "label": "Examples",
+          "pages": [
+            "examples/http",
+            "examples/kv",
+            "examples/d1",
+            "examples/r2",
+            "examples/queue",
+            "examples/counter",
+            "tutorial"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+---
+title: "Logs and tail"
+description: "How peren logs and peren tail read the local service event file."
+---
+
+`peren logs` and `peren tail` are the same command under two names. Both read the local events log for one service and exit. Neither opens a live follow stream.
+
+## Requirements
+
+- `--service` is required and must name a service in the fleet config.
+- There is no `--kind` flag.
+- `--node` is accepted and unused.
+
+```sh
+peren logs fleet.toml --service api
+peren tail fleet.toml --service api --level warn
+```
+
+## Event file
+
+While a node serves requests, Peren appends JSON lines to `$PEREN_DATA_DIR/tail/events.jsonl`, or to `./data/tail/events.jsonl` when `PEREN_DATA_DIR` is unset. That file is the local events log. The CLI reads it, filters by service and optional level, and prints human-readable lines.
+
+## Output
+
+The printed lines are for you to read. They can change between releases. The file on disk is JSONL. These commands do not print that JSON, and they have no `--json` flag.
+
+Representative lines:
+
+```text
+api POST /checkout status=500 outcome=error wall_time_ms=37
+api console Error checkout failed
+```
+
+## Procedures
+
+Flags and filters:
+
+- [Read service logs](/docs/cli/logs/)
+- [Tail service events](/docs/cli/tail/)
+
+## Related
+
+- [Observability](/docs/operations/observability/)
+- [CLI reference](/docs/reference/cli/)
+- [Ports and endpoints](/docs/reference/ports/)

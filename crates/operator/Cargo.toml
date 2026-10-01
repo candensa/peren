@@ -1,0 +1,24 @@
+[package]
+name = "peren-operator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+clap.workspace = true
+peren-config.workspace = true
+peren-migrate.workspace = true
+peren-node.workspace = true
+peren-primitives.workspace = true
+peren-queues.workspace = true
+peren-security.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+spinoff.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

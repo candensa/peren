@@ -1,0 +1,84 @@
+---
+title: "Client mTLS"
+description: "Present a client certificate on an outbound request without exposing PEM material to the Worker."
+---
+
+A client mTLS binding loads certificate and key PEM from environment variables into the node process. The Worker receives an opaque handle. It cannot read the certificate or key, and the binding has no `fetch` method.
+
+This binding is not fleet `[mtls]` peer material. Peer paths belong in the fleet file for node identity; see [Networking and ports](/docs/deploy/networking/).
+
+## Prerequisites
+
+- A fleet file with `[node]`, `[bucket]`, `[mtls]`, one service, and one socket
+- An outbound binding whose `allowed_hosts` includes the upstream host
+- Process environment variables that hold the client certificate PEM and private key PEM
+
+## Configure the binding
+
+Write `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.PUBLIC_API]
+type = "outbound"
+allowed_hosts = ["api.example.com"]
+
+[services.bindings.CLIENT_CERT]
+type = "mtls_certificate"
+cert_pem_env = "CLIENT_CERT_PEM"
+key_pem_env = "CLIENT_KEY_PEM"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+`type` must be `mtls_certificate`. `cert_pem_env` and `key_pem_env` name environment variables that contain PEM text. Set those variables in the process environment before starting the node.
+
+## Call the binding
+
+Write `worker.js`:
+
+```js
+export default {
+  async fetch(request, env) {
+    return fetch("https://api.example.com/secure", {
+      cf: { mtlsCertificate: env.CLIENT_CERT },
+    });
+  },
+};
+```
+
+Pass the binding through `cf.mtlsCertificate` on `fetch`, together with an outbound allowlist that includes the host. Do not call a method on `env.CLIENT_CERT`.
+
+## Success
+
+The upstream HTTP status and body are returned to the Worker. The node presents the client certificate on the TLS handshake. The Worker still cannot read `cert` or `key` on the binding.
+
+## Failure
+
+If `CLIENT_CERT_PEM` or `CLIENT_KEY_PEM` is missing from the process environment, the process fails before listeners open.
+
+## Related
+
+- [Outbound network](/docs/bindings/network/)
+- [Outbound fetch](/docs/bindings/outbound/)
+- [Networking and ports](/docs/deploy/networking/)

@@ -1,0 +1,130 @@
+---
+title: "Operate queues"
+description: "Inspect depth, pause delivery, resume delivery, purge messages, and redrive dead-letter queues."
+---
+
+Queue commands open the broker named in the fleet file and act on a queue you name. They need a config path and the flags shown below. The printed lines can change between releases.
+
+These commands share the broker configured under `[queues]`. Memory brokers are process-local, so a separate CLI process cannot inspect messages held only in a running node's memory. Use file, cell, or an external broker when you need operator commands against durable or shared state.
+
+## Inspect depth
+
+Outcome: report how many messages are ready, delayed, or leased, and whether the queue is paused.
+
+```bash
+peren queue depth fleet.toml --queue jobs
+```
+
+Required:
+
+- config path (positional);
+- `--queue` — queue name.
+
+State read: broker stats for that queue. No messages move.
+
+Representative output:
+
+```text
+queue jobs ready=3 delayed=1 leased=2 paused=false
+```
+
+Verify: after producers enqueue and consumers lease, `ready`, `delayed`, and `leased` change to match broker state. After pause, `paused=true`.
+
+## Pause delivery
+
+Outcome: stop new leases from the named queue.
+
+```bash
+peren queue pause fleet.toml --queue jobs
+```
+
+Required:
+
+- config path;
+- `--queue`.
+
+State change: the broker marks the queue paused. `changed` is `true` when the queue was not already paused.
+
+Representative output:
+
+```text
+queue jobs paused changed=true
+```
+
+Verify: `peren queue depth fleet.toml --queue jobs` shows `paused=true`. Consumers stop receiving new leases from that queue while it remains paused.
+
+## Resume delivery
+
+Outcome: allow leases again on a paused queue.
+
+```bash
+peren queue resume fleet.toml --queue jobs
+```
+
+Required:
+
+- config path;
+- `--queue`.
+
+State change: the broker clears the paused mark. `changed` is `true` when the queue was paused.
+
+Representative output:
+
+```text
+queue jobs resumed changed=true
+```
+
+Verify: depth shows `paused=false`. Consumers lease ready messages again.
+
+## Purge a queue
+
+Outcome: remove queued messages from the named queue and fence in-flight leases for that queue so they cannot complete as ordinary deliveries.
+
+<Warning>
+Purge destroys queued messages on the named queue and fences its leased messages. Depth after a successful purge reports `ready=0` and `delayed=0` for that queue. There is no undo. Confirm the queue name and take a broker-side backup when the broker supports one before you run purge.
+</Warning>
+
+```bash
+peren queue purge fleet.toml --queue jobs
+```
+
+Required:
+
+- config path;
+- `--queue`.
+
+State change: queued messages for that name are deleted. Leased messages for that queue are marked purged. The command prints how many queued and leased items were affected.
+
+Representative output:
+
+```text
+queue jobs purged queued=5 leased=2
+```
+
+Verify: `peren queue depth fleet.toml --queue jobs` shows `ready=0 delayed=0`. `leased` falls as purged leases leave the broker.
+
+## Redrive messages
+
+Outcome: move ready messages from a source queue onto a target queue.
+
+```bash
+peren queue redrive fleet.toml --source dead --target jobs
+```
+
+Required:
+
+- config path;
+- `--source` — queue to drain;
+- `--target` — queue that receives the moved messages.
+
+State change: ready messages leave `--source` and become ready on `--target`. The command reports how many moved.
+
+Representative output:
+
+```text
+queue dead redriven to jobs moved=4
+```
+
+Verify: depth on the source falls and depth on the target rises by the moved count. Resume the target if it was paused before expecting consumers to lease the redriven work.
+
+Related: [Queues binding](/docs/bindings/queues/), [Operations overview](/docs/operate/overview/).

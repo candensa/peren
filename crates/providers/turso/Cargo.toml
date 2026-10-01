@@ -1,0 +1,26 @@
+[package]
+name = "peren-provider-turso"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+peren-primitives.workspace = true
+peren-storage.workspace = true
+fs2.workspace = true
+rusqlite.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+turso.workspace = true
+turso_parser.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+peren-bindings.workspace = true
+peren-runtime.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

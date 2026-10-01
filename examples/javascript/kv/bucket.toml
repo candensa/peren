@@ -1,0 +1,28 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000125"
+advertise_addr = "127.0.0.1:7125"
+listen = "127.0.0.1:7125"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "kv"
+worker_bundle_path = "examples/javascript/kv/worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.KV]
+type = "kv"
+namespace = "demo"
+unique_key = "demo"
+backend = { kind = "bucket", endpoint = "https://s3.example.com", bucket = "peren-kv", prefix = "kv/", access_key_id_env = "KV_ACCESS_KEY_ID", secret_access_key_env = "KV_SECRET_ACCESS_KEY" }
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8125"
+service = "kv"

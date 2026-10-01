@@ -1,0 +1,147 @@
+---
+title: "Durable Object namespaces"
+description: "Address cells through a durable_object_namespace binding with idFromName, get, and stub.fetch."
+---
+
+A Durable Object namespace binding gives a Worker stable object ids and a stub that forwards HTTP to the object service for a configured `class_name`. Use it when one Worker must address many cells by name or id without placing every identity on the public path.
+
+<SystemDiagram name="namespace" />
+
+## Binding
+
+Configure `type = "durable_object_namespace"` with `class_name` and `unique_key`:
+
+```toml
+[services.bindings.COUNTER]
+type = "durable_object_namespace"
+class_name = "Counter"
+unique_key = "counter"
+```
+
+`class_name` must match a service whose entrypoint is `kind = "durable_object"` with the same `class_name`. The node routes stub fetches through that map. `unique_key` is required on the binding.
+
+## Methods
+
+The binding on `env` exposes:
+
+| Method | Result |
+| --- | --- |
+| `idFromName(name)` | Stable id derived from a string name |
+| `idFromString(id)` | Rebuilds an id previously produced by the same binding |
+| `newUniqueId()` | Creates a new unique id |
+| `get(id)` | Stub for that id |
+| `stub.fetch(input, init?)` | Forwards the request to the object service cell |
+
+`idFromString` and `get` throw `TypeError` when the id belongs to a different namespace binding.
+
+Cell identity for a stub fetch is derived from the binding name and the object id. Changing the binding name changes the cell.
+
+## What the isolate loads
+
+A public request calls `export default`. A stub fetch calls the class named by `class_name` when that module exports it, and calls `export default` when it does not. The class constructor receives state. `state.storage.get` and `state.storage.put` accept JSON values and `Uint8Array`. `Peren.storage` on `export default` still accepts strings and `Uint8Array`.
+
+See [Durable Objects in Peren](/docs/state/objects/) and [Build your first Durable Object](/docs/start/durable/).
+
+## Complete example
+
+`peren init` writes `leaf.pem` and `leaf.key` into `[mtls]`. `peren devcert ./certs` writes `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`. Align the paths before starting the node. Use `peren serve` so the file bucket and configured public port remain for the session. `peren dev` forces a memory bucket and port 0.
+
+### fleet.toml
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "file"
+path = "./data"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.COUNTER]
+type = "durable_object_namespace"
+class_name = "Counter"
+unique_key = "counter"
+
+[[services]]
+name = "counter"
+worker_bundle_path = "counter.js"
+compatibility_date = "2026-01-01"
+
+[services.entrypoint]
+kind = "durable_object"
+class_name = "Counter"
+unique_key = "counter"
+id_from = { source = "first_path_segment" }
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+### worker.js
+
+```js
+export default {
+  fetch(request, env) {
+    const id = env.COUNTER.idFromName("main");
+    return env.COUNTER.get(id).fetch(request);
+  },
+};
+```
+
+### counter.js
+
+```js
+export default {
+  async fetch() {
+    const value = await Peren.storage.transaction(async (storage) => {
+      const current = await storage.get("value");
+      const next =
+        current === undefined
+          ? 1
+          : Number(new TextDecoder().decode(current)) + 1;
+      await storage.put("value", String(next));
+      return next;
+    });
+    return Response.json({ value });
+  },
+};
+```
+
+### Run
+
+```sh
+peren devcert ./certs
+peren serve fleet.toml
+```
+
+```sh
+curl http://127.0.0.1:8080/
+curl http://127.0.0.1:8080/
+```
+
+Expected bodies:
+
+```json
+{"value":1}
+```
+
+```json
+{"value":2}
+```
+
+The public Worker resolves `main` through `idFromName`, obtains a stub with `get`, and forwards with `stub.fetch`. The object service runs `counter.js`'s default export against the cell for that namespace id.
+
+If `class_name` on the binding has no matching durable-object entrypoint, stub fetch fails at the host. Add the object service with the same `class_name`, then restart the node.

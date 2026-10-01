@@ -1,0 +1,106 @@
+---
+title: "Hyperdrive"
+description: "Expose redacted database connection metadata to a Worker through a Hyperdrive binding."
+---
+
+A Hyperdrive binding places connection and pool metadata on `env`. Use it when Worker code needs a connection string and cache or pool settings that match a configured PgCat endpoint. The binding does not open a database connection inside the isolate.
+
+`type` is `hyperdrive`. Config fields are `pgcat_endpoint`, `credential_scope`, optional `caching_disabled` (default `false`), `max_age_secs` (default `60`), `stale_while_revalidate_secs` (default `15`), and `pool_max_connections` (default `10`, must be greater than zero).
+
+## Properties
+
+| Property | Source |
+| --- | --- |
+| `connectionString` | `pgcat_endpoint` with username and password redacted |
+| `host` | the same redacted string as `connectionString` |
+| `cachingDisabled` | `caching_disabled` |
+| `maxAge` | `max_age_secs` |
+| `staleWhileRevalidate` | `stale_while_revalidate_secs` |
+| `poolMaxConnections` | `pool_max_connections` |
+| `provider.kind` | `"pgcat"` |
+
+There is no `fetch`, `connect`, or query method on this binding.
+
+## Configure
+
+Create `fleet.toml` and `worker.js`.
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.DB]
+type = "hyperdrive"
+pgcat_endpoint = "postgres://peren:secret@127.0.0.1:6432/app"
+credential_scope = "pgcat"
+caching_disabled = true
+max_age_secs = 15
+stale_while_revalidate_secs = 30
+pool_max_connections = 8
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+```js
+export default {
+  async fetch(_request, env) {
+    return Response.json({
+      provider: env.DB.provider.kind,
+      connectionString: env.DB.connectionString,
+      host: env.DB.host,
+      poolMaxConnections: env.DB.poolMaxConnections,
+      cachingDisabled: env.DB.cachingDisabled,
+      maxAge: env.DB.maxAge,
+      staleWhileRevalidate: env.DB.staleWhileRevalidate,
+    });
+  },
+};
+```
+
+## Run and verify
+
+```sh
+peren devcert ./certs
+peren dev fleet.toml
+```
+
+`peren dev` binds loopback listeners on port 0 and uses a memory bucket for that session. Call the `public:` URL it prints. `54321` below stands for that port. `peren serve` keeps the listen addresses and bucket kind from the file.
+
+```sh
+curl http://127.0.0.1:54321/
+```
+
+Expected JSON includes `"provider":"pgcat"`, a redacted `connectionString`, `"poolMaxConnections":8`, and `"cachingDisabled":true`. The Worker cannot read the original password from the binding.
+
+## Failure
+
+If `pool_max_connections` is `0`, Peren refuses the fleet file with:
+
+```text
+must be greater than zero
+```
+
+Set `pool_max_connections` to a positive integer, then start the node again.
+
+## Related
+
+- [Bindings overview](/docs/bindings/overview/)
+- [Provider selection](/docs/bindings/providers/)

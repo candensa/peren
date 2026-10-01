@@ -1,0 +1,54 @@
+---
+title: "Compatibility and provider requirements"
+description: "Supported, bounded, and refused runtime and provider behavior before you migrate or deploy."
+---
+
+Use this page before you migrate or deploy. It lists what Peren runs, what it limits, and what it refuses.
+
+## Supported
+
+These work in this build:
+
+- JavaScript Workers in V8 isolates, with `export default` as the entry and `fetch(request, env, ctx)` where `ctx` is `{ waitUntil }`.
+- Host-gated global `fetch`, outbound bindings, client mTLS certificates, and AWS SigV4 signing in the node process.
+- KV, native D1 and Turso, R2-style object storage, queues, cache via global `caches`, AI, vector indexes, service bindings, dispatch namespaces, workflows, rate limiting, analytics write points, Hyperdrive metadata, images gateways, loaders, and secrets-store strings.
+- Durable Object namespaces with stub `fetch` and cell-backed storage in the Peren host model.
+- Node compatibility modules that the runtime marks supported, including `node:assert`, `node:buffer`, `node:events`, `node:path`, `node:url`, and related Worker-safe helpers.
+- Prometheus metrics at `/metrics`, health at `/healthz` and `/readyz`, and `peren logs` / `peren tail` with `--service`.
+
+## Bounded
+
+These work with stated limits:
+
+| Surface | Bound |
+| --- | --- |
+| Isolate limits | Defaults: 32 MiB request body, 128 MiB heap, 30000 ms wall clock, 10000 subrequests, 256 isolates. `max_cpu_time_ms` is config-only on the live HTTP path. |
+| Containers | `fetch` proxies to the configured local port. `exec`, `start`, `stop`, `destroy`, `writeFile`, and `readFile` throw. |
+| KV `compareAndSet` | Works on the native KV backend. Redis and bucket backends throw. |
+| Web Crypto | HMAC, AES-GCM/CBC, PBKDF2/HKDF, Ed25519, and ECDSA P-256 are available. RSA and broader algorithm sets refuse. |
+| Node compatibility | A deliberate subset. `nodejs_compat` and `nodejs_compat_v2` produce a migration notice that you must verify each `node:` import. Modules such as `node:fs`, `node:net`, `node:dns`, and `node:tls` refuse in the isolate. |
+| Outbound `fetch` | Allowed hosts come from configured bindings. Redirect targets are not checked again. |
+| Rate limiter | Counters are process-local. |
+| WebSocketPair and hibernation | Supported for the local Peren host model. Full Cloudflare edge hibernation parity outside that model is unsupported. |
+
+## Refused
+
+Peren refuses these instead of approximating them:
+
+- External D1 backends at query time. Native SQLite and Turso are the implemented database backends.
+- `peren d1 restore`. Native D1 has no time travel.
+- `[otlp]` and `[logpush]` during config validation.
+- Container sandbox control methods listed above.
+- Compatibility flags outside the migrate support table. Known partial flags are recorded as notices; unknown flags fail migration.
+- Inbound TLS termination with `[mtls]` paths. Peer listeners stay plain TCP. Keep the peer port off the public network.
+- Treating tenant revoke or scoped-credential `authorize` as a live request check. Revoke writes a registry. `authorize` is not on the Worker request path.
+
+## Storage providers
+
+A fleet bucket used for ownership and recovery must preserve conditional-write and ranged-read behavior. Run `peren conformance storage` against the exact endpoint and credentials intended for production before serving fleet traffic from that store.
+
+## Related
+
+- [Migrate overview](/docs/migrate/overview/)
+- [Migrate from Cloudflare Workers](/docs/deployment/cloudflare/)
+- [Security model](/docs/security/overview/)

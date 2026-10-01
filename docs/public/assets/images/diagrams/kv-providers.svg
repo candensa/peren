@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 956 460" role="img" aria-labelledby="title">
+<title id="title">Same get, different durability.</title>
+<defs>
+  <marker id="kv-providers-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 0 1.2 L 10 5 L 0 8.8 z" fill="#b3261e"/>
+  </marker>
+  <marker id="kv-providers-start" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M 10 1.2 L 0 5 L 10 8.8 z" fill="#b3261e"/>
+  </marker>
+</defs>
+<rect x="0" y="0" width="956" height="460" rx="20" fill="#fbfaf7"/>
+<rect x="24" y="120" width="260" height="144" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="40" y="144" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">ISOLATE</text>
+<rect x="328" y="24" width="604" height="412" rx="16" fill="#f3f1ec" stroke="#d8d4ce" stroke-width="1.5"/>
+<text x="344" y="48" fill="#5e5a55" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="12" font-weight="600" letter-spacing="0.08em">BACKENDS</text>
+<path d="M 252.0 204.0 L 306.0 204.0 L 306.0 118.0 L 360.0 118.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#kv-providers-end)"/>
+<path d="M 252.0 204.0 L 306.0 204.0 L 306.0 242.0 L 360.0 242.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#kv-providers-end)"/>
+<path d="M 252.0 204.0 L 306.0 204.0 L 306.0 366.0 L 360.0 366.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#kv-providers-end)"/>
+<path d="M 620.0 118.0 L 660.0 118.0 L 660.0 108.0 L 700.0 108.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#kv-providers-end)"/>
+<path d="M 640.0 242.0 L 680.0 242.0 L 680.0 224.0 L 720.0 224.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#kv-providers-end)"/>
+<path d="M 640.0 366.0 L 680.0 366.0 L 680.0 352.0 L 720.0 352.0" fill="none" stroke="#b3261e" stroke-width="1.6" marker-end="url(#kv-providers-end)"/>
+<rect x="56" y="176" width="196" height="56" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6"/>
+<text x="154" y="209.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">env.KV.get</text>
+<rect x="360" y="80" width="260" height="76" rx="12" fill="#e7f2ee" stroke="#2f5d50" stroke-width="1.6"/>
+<text x="490" y="115.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">native</text>
+<text x="490" y="131.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">compareAndSet ok</text>
+<rect x="700" y="80" width="160" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="780" y="113.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">shared</text>
+<rect x="360" y="204" width="280" height="76" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="500" y="239.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">redis</text>
+<text x="500" y="255.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">compareAndSet throws</text>
+<rect x="720" y="196" width="160" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="800" y="229.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">shared</text>
+<rect x="360" y="328" width="280" height="76" rx="12" fill="#f8ebe9" stroke="#b3261e" stroke-width="1.6" stroke-dasharray="5 4"/>
+<text x="500" y="363.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">bucket</text>
+<text x="500" y="379.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">compareAndSet throws</text>
+<rect x="720" y="324" width="180" height="56" rx="12" fill="#ffffff" stroke="#b3261e" stroke-width="1.6"/>
+<text x="810" y="357.0" text-anchor="middle" fill="#141414" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" font-weight="500">node-local</text>
+</svg>

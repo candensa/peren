@@ -1,0 +1,43 @@
+---
+title: "Deployment overview"
+description: "Run a Peren node, protect its listeners, and record service generations."
+---
+
+A production deployment runs the Peren process, keeps peer traffic off the public network, points the fleet at durable storage, and records each service generation before you accept that the release is complete.
+
+## What you operate
+
+One node is one Peren process with a fleet config. The process loads Worker bundles from the paths in that config when it starts. Public sockets receive application traffic. The peer listener receives control and coordination traffic on plain TCP.
+
+`[mtls]` certificate paths are required in the config. The process does not terminate inbound TLS with those files. Terminate TLS at a reverse proxy or load balancer, and keep the peer port off the public network. Outbound Worker client certificates are a separate binding; see [mTLS bindings](/docs/bindings/mtls/).
+
+## Release sequence
+
+1. Validate the fleet config.
+2. Qualify storage against the exact endpoint and credentials the fleet will use.
+3. Start or restart the node so it loads the Worker bundles on disk.
+4. Record a deployment generation.
+5. Verify the recorded digest matches the files on disk.
+6. Check deployment health.
+7. Roll back the active record only when an earlier digest still matches the files on disk.
+
+```sh
+peren config validate peren.toml
+peren conformance storage peren.toml
+peren serve peren.toml
+peren deploy peren.toml --percent 100
+peren deploy verify peren.toml --service api
+peren deploy health peren.toml --service api
+```
+
+`peren deploy` writes a digest and a percentage under the data directory. It does not reload a running process. The percentage does not split traffic. See [Deploy and roll back](/docs/deployment/deploy/).
+
+## Topology choices
+
+Start with one node when a restart on that host is enough. Add nodes that share the same bucket when you need recovery after a node stops. Kubernetes can run the process. Ownership and recovery still follow the bucket. See [Kubernetes](/docs/deploy/kubernetes/) and [Networking](/docs/deploy/networking/).
+
+## Before traffic
+
+Confirm `/healthz`, `/readyz`, and `/metrics` on each listener you expose to the platform. Confirm peer listeners are not reachable from the public network. Confirm backup and rollback procedures against a previous generation before treating the fleet as production-ready.
+
+Related: [Deploy and roll back](/docs/deployment/deploy/), [Operations overview](/docs/operate/overview/), [Observability](/docs/operations/observability/).

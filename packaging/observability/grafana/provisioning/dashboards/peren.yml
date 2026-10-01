@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Peren
+    orgId: 1
+    folder: Peren
+    type: file
+    disableDeletion: true
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

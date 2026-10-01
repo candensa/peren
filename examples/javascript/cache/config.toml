@@ -1,0 +1,25 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000116"
+advertise_addr = "127.0.0.1:7116"
+listen = "127.0.0.1:7116"
+
+[bucket]
+kind = "memory"
+
+[cache]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "cache"
+worker_bundle_path = "examples/javascript/cache/worker.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8116"
+service = "cache"

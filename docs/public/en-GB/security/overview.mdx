@@ -1,0 +1,67 @@
+---
+title: "Security model"
+description: "What stays inside the Worker, what stays on the node, and what you still lock down yourself."
+---
+
+Worker code receives the bindings and secret strings you declared. Signing keys, client certificate PEM, and node identity keys stay in the node process.
+
+## Isolate limits and bindings
+
+**What it covers:** the Worker isolate and every host capability it can reach.
+
+**What Peren does:** runs the Worker in a V8 isolate, applies heap and wall-clock limits, and performs binding calls in the node process. Defaults under `[limits]`:
+
+| Field | Default |
+| --- | --- |
+| `max_request_body_bytes` | 32 MiB |
+| `max_heap_bytes` | 128 MiB |
+| `max_execution_time_ms` | 30000 |
+| `max_subrequests_per_invocation` | 10000 |
+| `max_isolates` | 256 |
+
+`max_cpu_time_ms` exists in config. The live HTTP path does not apply it. Wall-clock `max_execution_time_ms` is the limit that terminates a long request.
+
+Peren places bindings on `env` and performs the call in the node process. Global `fetch` succeeds only when the host is in the service's outbound set: `allowed_hosts` on `type = "outbound"`, plus hosts from configured AI, vector, images, or container bindings. A host outside that set fails the call.
+
+**What you configure:** which bindings and hosts appear in the fleet file, and which secret names must resolve before listeners open.
+
+**What you can check:** a request longer than `max_execution_time_ms` stops. A host outside the allowlist fails. More than `max_isolates` concurrent isolates is refused.
+
+## Worker-visible secrets versus host-held credentials
+
+**What it covers:** application secrets and provider credentials.
+
+**What Peren does:** a Worker secret or secrets-store binding becomes a string on `env`. Peren reads AWS SigV4 keys and client mTLS PEM from environment variables named in the binding. The Worker cannot read those keys or PEM values. SigV4 signing overwrites `authorization`, `x-amz-date`, `x-amz-content-sha256`, `x-amz-security-token`, and `host` in the node process. A missing secret or missing PEM variable stops the process before listeners open.
+
+**What you configure:** which names are Worker secrets, which names are provider environment variables, and when you rotate both. See [Credentials and secrets](/docs/security/credentials/) and [Rotate secrets](/docs/operate/secrets/).
+
+**What you can check:** `env.SECRET` in the Worker is a string. The Worker cannot print SigV4 keys or mTLS PEM.
+
+## Peer network exposure
+
+**What it covers:** the peer listener.
+
+**What Peren does:** requires `[mtls]` certificate paths in the fleet file. Worker client certificates are a separate `type = "mtls_certificate"` binding.
+
+**What you configure:** keep the peer port off the public network. Peer listeners are plain TCP. Peren does not terminate inbound TLS with the `[mtls]` files.
+
+**What you can check:** a connection to the peer port is plain TCP. Certificate paths in `[mtls]` do not make that listener speak TLS.
+
+## Tenant revoke
+
+**What it covers:** tenant records for the fleet.
+
+**What Peren does:** `peren tenant revoke` writes a revocation into the tenant registry under the data directory and records an audit entry.
+
+**What you configure:** stop or replace running work after revoke. The command does not stop a running isolate. A running isolate does not read the registry to deny a request.
+
+**What you can check:** revoke updates `tenants.json`. Requests on a node that is already running continue until you stop or replace that process.
+
+## Related
+
+- [Worker isolation](/docs/security/isolation/)
+- [Network policy](/docs/security/network/)
+- [Tenant isolation](/docs/security/tenants/)
+- [Credentials and secrets](/docs/security/credentials/)
+- [Rotate secrets](/docs/operate/secrets/)
+- [Compatibility and provider requirements](/docs/deployment/compatibility/)

@@ -1,0 +1,14 @@
+---
+title: "Peren overview"
+description: "What Peren runs, who operates it, and where its boundaries are."
+---
+
+Peren runs Cloudflare-style Workers and Durable Objects on infrastructure you control. A Worker handles events in a V8 isolate. A cell owns durable state for one routed object identity. A node is one running Peren process. A fleet is one or more nodes that share storage and peer identity.
+
+Use Peren when you want the Worker programming model, explicit provider choice, and recoverable state without depending on a hosted edge control plane. Choose another platform when the application only needs stateless HTTP functions, when another platform already owns your deployment and data boundaries, or when you need a Cloudflare API that Peren does not support.
+
+<SystemDiagram name="overview" />
+
+JavaScript and WebAssembly are the production runtime paths. TypeScript and other languages can feed those bundles through your own build, but Peren loads the configured Worker bundle, not a separate language runtime.
+
+Continue with [Install Peren](/docs/start/install/).

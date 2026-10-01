@@ -1,0 +1,28 @@
+[node]
+node_id = "00000000-0000-0000-0000-000000000127"
+advertise_addr = "127.0.0.1:7127"
+listen = "127.0.0.1:7127"
+
+[bucket]
+kind = "file"
+path = "data/workflow"
+
+[mtls]
+ca_cert_path = "certs/ca.pem"
+leaf_cert_path = "certs/leaf-cert.pem"
+leaf_key_path = "certs/leaf-key.pem"
+
+[[services]]
+name = "workflow"
+worker_bundle_path = "examples/javascript/workflow/worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.FLOW]
+type = "workflow"
+class_name = "Example"
+unique_key = "example"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8127"
+service = "workflow"

@@ -1,0 +1,122 @@
+---
+title: "Entrypoints and RPC"
+description: "Bind one service to another and call fetch or methods on export default through x-peren-rpc-method."
+---
+
+A service binding puts another configured service on `env` as a callable target. Use it when one Worker must invoke another service in the same fleet without opening a public socket for that call. Prefer an outbound binding when the target is an external host.
+
+<SystemDiagram name="rpc" />
+
+`type` is `service`. `entrypoint` is the name of an existing `[[services]]` entry. Optional `props` and `class_name` are accepted in the fleet file and are not hydrated onto the binding object. Peren installs `export default` as the target entry. Named class exports are not the RPC entry.
+
+The binding exposes `fetch`. Any other property name is forwarded as an RPC call. The node sends a `POST` with header `x-peren-rpc-method` and a JSON body `{ "args": [...] }`. The target looks up that method on `export default` and applies the args. Success returns `{ ok: true, value }` with content type `application/vnd.peren.rpc+json`. A missing method returns status 404. A thrown error returns status 500 with the error message. Ordinary `fetch` handling is skipped for those requests.
+
+## Prerequisites
+
+- [Install Peren](/docs/start/install/) so `peren` is on your `PATH`
+- Two Worker files and one fleet file that names both services
+- Development certificates from `peren devcert ./certs`, with `[mtls]` edited to `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`
+
+## Configure two services
+
+Create `fleet.toml`:
+
+```toml
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:7000"
+listen = "127.0.0.1:7000"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "./certs/ca.pem"
+leaf_cert_path = "./certs/leaf-cert.pem"
+leaf_key_path = "./certs/leaf-key.pem"
+
+[[services]]
+name = "api"
+worker_bundle_path = "worker.js"
+compatibility_date = "2026-01-01"
+
+[services.bindings.AUTH]
+type = "service"
+entrypoint = "auth"
+
+[[services]]
+name = "auth"
+worker_bundle_path = "auth.js"
+compatibility_date = "2026-01-01"
+
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:8080"
+service = "api"
+```
+
+Create `worker.js`:
+
+```js
+export default {
+  async fetch(_request, env) {
+    const result = await env.AUTH.session("ada", { role: "admin" });
+    return Response.json(result);
+  },
+};
+```
+
+Create `auth.js`:
+
+```js
+export default {
+  async fetch(request) {
+    return new Response(
+      `${new URL(request.url).pathname}:${request.method}:${await request.text()}`,
+      { status: 207 },
+    );
+  },
+
+  async session(name, details) {
+    return { user: name, role: details.role, issued: true };
+  },
+};
+```
+
+`env.AUTH.fetch` forwards an HTTP request to the `auth` service. `env.AUTH.session(...)` is the RPC path to the `session` method on that service's default export.
+
+## Run and verify
+
+```sh
+peren serve fleet.toml
+```
+
+```sh
+curl http://127.0.0.1:8080/
+```
+
+The response body is:
+
+```text
+{"user":"ada","role":"admin","issued":true}
+```
+
+That body proves the service binding reached `auth` and returned the RPC value.
+
+## Failure
+
+If `entrypoint` does not name a configured service, Peren refuses the fleet file with:
+
+```text
+unknown service binding target
+```
+
+Point `entrypoint` at an existing `[[services]].name`, then start the node again.
+
+If the target has no method for the RPC name, the call fails with status 404 and an error that the method is not exported.
+
+## Related
+
+- [Service bindings](/docs/bindings/service/)
+- [Workers](/docs/build/workers/)
+- [Runtime API reference](/docs/reference/runtime/)
