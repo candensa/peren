@@ -1,6 +1,7 @@
-use std::{collections::BTreeMap, io::Write};
+use std::{collections::BTreeMap, io::Write, path::PathBuf};
 
 use peren_node::{Process, prepare_test_server};
+use tokio::task::JoinHandle;
 
 use crate::{
     cli,
@@ -60,50 +61,77 @@ async fn start_with_inherited(
 }
 
 pub(super) async fn dev(command: cli::Worker) -> Result<(), CliError> {
+    let mut running = start_dev_session(&command).await?;
     loop {
-        let session = Session::load(&command)?;
-        session.print_topology(command.json)?;
-        let tail_path = session.tail_path();
-        let watch_paths = session.watch_paths(&command.config);
-        let config = prepare_test_server(session.raw.clone())?;
-        let progress = Progress::start(Style::Dots, "Starting local Peren");
-        let process = Process::start_development(config, &session.environment).await?;
-        progress.success("Local Peren is running");
-        for (name, address) in process.listeners() {
-            println!("{name}: http://{address}");
-        }
-        for (name, address) in process.listeners() {
-            println!("dev inspector {name}: http://{address}/__peren/dev");
-        }
-        println!("watching {} path(s) for reload", watch_paths.len());
-        std::io::stdout().flush().map_err(CliError::ReadyOutput)?;
-        let live_tail =
-            (!command.json).then(|| tokio::spawn(super::develop::follow_tail(tail_path)));
-        let mut reload = tokio::spawn(super::develop::watch_reload(watch_paths));
+        let mut reload = tokio::spawn(super::develop::watch_reload(running.watch_paths.clone()));
         tokio::select! {
             signal = shutdown_signal() => {
                 signal?;
-                if let Some(task) = live_tail {
-                    task.abort();
-                }
+                running.abort_tail();
                 reload.abort();
                 let progress = Progress::start(Style::Line, "Stopping local Peren");
-                process.shutdown().await?;
+                running.process.shutdown().await?;
                 progress.success("Local Peren stopped");
                 return Ok(());
             }
             changed = &mut reload => {
-                if let Some(task) = live_tail {
-                    task.abort();
-                }
                 let changed = changed.map_err(|source| CliError::Reload(source.to_string()))?;
                 let progress = Progress::start(Style::Line, "Reloading local Peren");
-                process.shutdown().await?;
-                let message = format!("Reloading after {}", changed.display());
-                progress.success(&message);
+                match start_dev_session(&command).await {
+                    Ok(next) => {
+                        running.abort_tail();
+                        running.process.shutdown().await?;
+                        let message = format!("Reloaded after {}", changed.display());
+                        progress.success(&message);
+                        running = next;
+                    }
+                    Err(error) => {
+                        progress.success("Reload failed; keeping previous local Peren running");
+                        eprintln!("reload failed after {}: {error}", changed.display());
+                    }
+                }
             }
         }
     }
+}
+
+struct RunningDev {
+    process: Process,
+    live_tail: Option<JoinHandle<()>>,
+    watch_paths: Vec<PathBuf>,
+}
+
+impl RunningDev {
+    fn abort_tail(&mut self) {
+        if let Some(task) = self.live_tail.take() {
+            task.abort();
+        }
+    }
+}
+
+async fn start_dev_session(command: &cli::Worker) -> Result<RunningDev, CliError> {
+    let session = Session::load(command)?;
+    session.print_topology(command.json)?;
+    let tail_path = session.tail_path();
+    let watch_paths = session.watch_paths(&command.config);
+    let config = prepare_test_server(session.raw.clone())?;
+    let progress = Progress::start(Style::Dots, "Starting local Peren");
+    let process = Process::start_development(config, &session.environment).await?;
+    progress.success("Local Peren is running");
+    for (name, address) in process.listeners() {
+        println!("{name}: http://{address}");
+    }
+    for (name, address) in process.listeners() {
+        println!("dev inspector {name}: http://{address}/__peren/dev");
+    }
+    println!("watching {} path(s) for reload", watch_paths.len());
+    std::io::stdout().flush().map_err(CliError::ReadyOutput)?;
+    let live_tail = (!command.json).then(|| tokio::spawn(super::develop::follow_tail(tail_path)));
+    Ok(RunningDev {
+        process,
+        live_tail,
+        watch_paths,
+    })
 }
 
 pub(super) async fn test(command: cli::Worker) -> Result<(), CliError> {
