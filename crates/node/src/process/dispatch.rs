@@ -479,7 +479,7 @@ pub(crate) async fn dispatch_worker(
     if !worker_first
         && let Some(response) = asset::serve(app.assets.as_ref(), &method, uri.path()).await?
     {
-        app.trace.record_span(
+        let _ = app.trace.record_span(
             &trace,
             SpanRecord {
                 service: &service_name,
@@ -495,14 +495,14 @@ pub(crate) async fn dispatch_worker(
                 },
                 attributes: BTreeMap::from([
                     ("http.request.method".into(), method_name.clone()),
-                    ("url.path".into(), path.clone()),
+                    ("url.path".into(), uri.path().to_string()),
                     (
                         "http.response.status_code".into(),
                         response.status().as_u16().to_string(),
                     ),
                 ]),
             },
-        )?;
+        );
         record_tail(TailRecord {
             tail: &tail_path,
             service: &service_name,

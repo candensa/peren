@@ -586,7 +586,7 @@ Optional table. Restart the process after you change it.
 | --- | --- | --- | --- | --- | --- | --- |
 | `tracing.sampling_ratio` | number | no | `1.0` | `0` through `1` inclusive | validation | outside that range fails validation |
 
-Sampled traces are written locally under `${PEREN_DATA_DIR}/traces/events.jsonl`. Use `peren trace` to read them.
+Sampled traces are written locally under `${PEREN_DATA_DIR}/traces/events.jsonl`. The active file rotates at 64 MiB, and Peren keeps one previous segment at `events.jsonl.1`. Use `peren trace` to read the retained local events.
 
 ## `[otlp]`
 

@@ -454,9 +454,6 @@ fn unsupported_exporters_are_rejected_instead_of_silent() {
         r#"[logpush]
 endpoint = "https://logs.example"
 
-[otlp]
-endpoint = "https://otel.example"
-
 [chronicle_export]
 endpoint = "https://chronicle.example"
 
@@ -473,8 +470,28 @@ endpoint = "https://chronicle.example"
         .collect();
 
     assert!(fields.contains(&"logpush"), "{fields:?}");
-    assert!(fields.contains(&"otlp"), "{fields:?}");
     assert!(fields.contains(&"chronicle_export"), "{fields:?}");
+}
+
+#[test]
+fn otlp_exporter_config_is_supported() {
+    let source = MINIMAL.replace(
+        "[bucket]",
+        r#"[otlp]
+endpoint = "https://otel.example/v1/traces"
+service_name = "peren-test"
+channel_capacity = 8
+batch_max_spans = 4
+flush_interval_secs = 1
+request_timeout_secs = 1
+
+[bucket]"#,
+    );
+    let config = FleetConfig::from_toml(&source).unwrap().validate().unwrap();
+    let otlp = config.raw.otlp.unwrap();
+
+    assert_eq!(otlp.endpoint, "https://otel.example/v1/traces");
+    assert_eq!(otlp.service_name, "peren-test");
 }
 
 #[test]

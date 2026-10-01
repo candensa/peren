@@ -1,7 +1,7 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     fs,
-    io::Write,
+    io::{BufRead, Write},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -20,6 +20,8 @@ use uuid::Uuid;
 use crate::{Environment, Shutdown, TaskError};
 
 const FILE: &str = "events.jsonl";
+const ROTATED_FILE: &str = "events.jsonl.1";
+pub const MAX_LOCAL_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub(crate) struct TraceSink {
@@ -235,6 +237,7 @@ pub(crate) fn append(root: &Path, event: &Event) -> Result<(), TraceError> {
     let path = root.join(FILE);
     let mut line = serde_json::to_vec(event)?;
     line.push(b'\n');
+    rotate_if_needed(root, &path, u64::try_from(line.len()).unwrap_or(u64::MAX))?;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -245,6 +248,37 @@ pub(crate) fn append(root: &Path, event: &Event) -> Result<(), TraceError> {
         })?;
     file.write_all(&line)
         .map_err(|source| TraceError::Write { path, source })
+}
+
+fn rotate_if_needed(root: &Path, path: &Path, incoming_bytes: u64) -> Result<(), TraceError> {
+    let current_bytes = match fs::metadata(path) {
+        Ok(metadata) => metadata.len(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(TraceError::Read {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if current_bytes.saturating_add(incoming_bytes) <= MAX_LOCAL_BYTES {
+        return Ok(());
+    }
+    let rotated = root.join(ROTATED_FILE);
+    match fs::remove_file(&rotated) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(TraceError::Write {
+                path: rotated,
+                source,
+            });
+        }
+    }
+    fs::rename(path, &rotated).map_err(|source| TraceError::Write {
+        path: rotated,
+        source,
+    })
 }
 
 #[derive(Debug)]
@@ -274,36 +308,66 @@ pub fn read(
     {
         return Err(TraceError::Service(service.clone()));
     }
-    let path = root(environment).join(FILE);
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(source) => return Err(TraceError::Read { path, source }),
+    let mut events = VecDeque::new();
+    let limit = request.limit.max(1);
+    for file in [ROTATED_FILE, FILE] {
+        read_matching(&root(environment).join(file), request, limit, &mut events)?;
+    }
+    Ok(Report {
+        events: events.into_iter().collect(),
+    })
+}
+
+fn read_matching(
+    path: &Path,
+    request: &Read,
+    limit: usize,
+    events: &mut VecDeque<Event>,
+) -> Result<(), TraceError> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(TraceError::Read {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
     };
-    let mut events = text
-        .lines()
-        .rev()
-        .filter(|line| !line.trim().is_empty())
-        .map(serde_json::from_str)
-        .filter_map(Result::ok)
-        .filter(|event: &Event| {
-            request
-                .service
-                .as_ref()
-                .is_none_or(|service| &event.service == service)
-                && request
-                    .trace_id
-                    .as_ref()
-                    .is_none_or(|trace_id| &event.trace_id == trace_id)
-                && request
-                    .request_id
-                    .as_ref()
-                    .is_none_or(|request_id| event.request_id.as_ref() == Some(request_id))
-        })
-        .take(request.limit.max(1))
-        .collect::<Vec<_>>();
-    events.reverse();
-    Ok(Report { events })
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line.map_err(|source| TraceError::Read {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(event) = serde_json::from_str::<Event>(&line) else {
+            continue;
+        };
+        if matches_request(&event, request) {
+            events.push_back(event);
+            while events.len() > limit {
+                events.pop_front();
+            }
+        }
+    }
+    Ok(())
+}
+
+fn matches_request(event: &Event, request: &Read) -> bool {
+    request
+        .service
+        .as_ref()
+        .is_none_or(|service| &event.service == service)
+        && request
+            .trace_id
+            .as_ref()
+            .is_none_or(|trace_id| &event.trace_id == trace_id)
+        && request
+            .request_id
+            .as_ref()
+            .is_none_or(|request_id| event.request_id.as_ref() == Some(request_id))
 }
 
 fn root(environment: &impl Environment) -> PathBuf {

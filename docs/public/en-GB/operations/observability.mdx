@@ -59,6 +59,8 @@ peren trace peren.toml --trace-id 4bf92f3577b34da6a3ce929d0e0e4736 --json
 
 Lifecycle traces include `cell.restore`, `cell.dispatch`, `cell.commit`, and `cell.release` spans for Worker dispatch. Service binding fetches record `service.fetch`, and Durable Object fetches record `durable_object.fetch`; child dispatches keep the same trace id through those boundaries.
 
+The local trace file rotates at 64 MiB. Peren keeps the active file and one previous segment, `events.jsonl.1`; older local trace events are discarded. Use OTLP export when traces need longer retention.
+
 ## OTLP export
 
 Add `[otlp]` to export sampled lifecycle spans to an OTLP HTTP trace endpoint. Export is best effort. Collector failures do not stop Worker dispatch, and Peren keeps appending local trace JSONL while the collector is down.
