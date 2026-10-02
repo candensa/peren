@@ -420,8 +420,8 @@ pub(super) async fn deployment_record(
     if !is_peer(&app) {
         return AxumStatusCode::NOT_FOUND.into_response();
     }
-    if let Err(response) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
-        return response;
+    if let Err(error) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
+        return control_auth_error(error.message());
     }
     let request = match serde_json::from_slice::<DeploymentRecordRequest>(&body) {
         Ok(request) => request,
@@ -547,8 +547,8 @@ pub(super) async fn node_drain(
     if !is_peer(&app) {
         return AxumStatusCode::NOT_FOUND.into_response();
     }
-    if let Err(response) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
-        return response;
+    if let Err(error) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
+        return control_auth_error(error.message());
     }
     app.readiness.store(false, Ordering::Release);
     app.admission.set_mode(AdmissionMode::Draining);
@@ -565,8 +565,8 @@ pub(super) async fn node_control_only(
     if !is_peer(&app) {
         return AxumStatusCode::NOT_FOUND.into_response();
     }
-    if let Err(response) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
-        return response;
+    if let Err(error) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
+        return control_auth_error(error.message());
     }
     app.readiness.store(false, Ordering::Release);
     app.admission.set_mode(AdmissionMode::ControlOnly);
@@ -583,8 +583,8 @@ pub(super) async fn node_retire(
     let Some(report) = peer_report(&app) else {
         return AxumStatusCode::NOT_FOUND.into_response();
     };
-    if let Err(response) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
-        return response;
+    if let Err(error) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
+        return control_auth_error(error.message());
     }
     if !report.disk_removal_safe {
         return (AxumStatusCode::CONFLICT, AxumJson(report)).into_response();
@@ -623,19 +623,17 @@ fn authorize_control_mutation(
     method: &str,
     uri: &Uri,
     body: &[u8],
-) -> Result<(), axum::response::Response> {
+) -> Result<(), ControlAuthError> {
     if !app.config.raw.control.require_signed_mutations {
         return Ok(());
     }
     let target_node = required_header(headers, "x-peren-target-node")?;
     if target_node != app.node.as_uuid().to_string() {
-        return Err(control_auth_error(
-            "target node does not match this listener",
-        ));
+        return Err(ControlAuthError::TargetNode);
     }
     let timestamp_ms = required_header(headers, "x-peren-request-timestamp-ms")?
         .parse::<i64>()
-        .map_err(|_| control_auth_error("timestamp is invalid"))?;
+        .map_err(|_| ControlAuthError::Timestamp)?;
     let nonce = required_header(headers, "x-peren-nonce")?;
     let version = required_header(headers, "x-peren-signature-version")?;
     let signature = required_header(headers, "x-peren-signature")?;
@@ -656,20 +654,20 @@ fn authorize_control_mutation(
         &version,
         &signature,
     )
-    .map_err(|_| control_auth_error("control request signature is invalid"))?;
+    .map_err(|_| ControlAuthError::Signature)?;
     remember_control_nonce(app, &target_node, &nonce, timestamp_ms)
 }
 
 fn required_header(
     headers: &HeaderMap,
     name: &'static str,
-) -> Result<String, axum::response::Response> {
+) -> Result<String, ControlAuthError> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
-        .ok_or_else(|| control_auth_error("control request signature is required"))
+        .ok_or(ControlAuthError::RequiredSignature)
 }
 
 fn remember_control_nonce(
@@ -677,23 +675,48 @@ fn remember_control_nonce(
     node: &str,
     nonce: &str,
     timestamp_ms: i64,
-) -> Result<(), axum::response::Response> {
-    let now = now_ms().map_err(|_| control_auth_error("system clock is invalid"))?;
+) -> Result<(), ControlAuthError> {
+    let now = now_ms().map_err(|()| ControlAuthError::Clock)?;
     let mut seen = app
         .control_replay
         .lock()
-        .map_err(|_| control_auth_error("control replay state is unavailable"))?;
+        .map_err(|_| ControlAuthError::ReplayState)?;
     let floor = now.saturating_sub(5 * 60 * 1_000);
     seen.retain(|_, seen_at| *seen_at >= floor);
     let key = format!("{node}:{nonce}");
     if seen.insert(key, timestamp_ms).is_some() {
-        return Err(control_auth_error("control request nonce was already used"));
+        return Err(ControlAuthError::Replay);
     }
     Ok(())
 }
 
 fn control_key_dir(app: &App) -> PathBuf {
     app.data.join("credentials")
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ControlAuthError {
+    RequiredSignature,
+    TargetNode,
+    Timestamp,
+    Signature,
+    Clock,
+    ReplayState,
+    Replay,
+}
+
+impl ControlAuthError {
+    const fn message(self) -> &'static str {
+        match self {
+            Self::RequiredSignature => "control request signature is required",
+            Self::TargetNode => "target node does not match this listener",
+            Self::Timestamp => "timestamp is invalid",
+            Self::Signature => "control request signature is invalid",
+            Self::Clock => "system clock is invalid",
+            Self::ReplayState => "control replay state is unavailable",
+            Self::Replay => "control request nonce was already used",
+        }
+    }
 }
 
 fn control_auth_error(message: &str) -> axum::response::Response {
