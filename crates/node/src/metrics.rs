@@ -228,7 +228,7 @@ peren_placement_weight {}\n\
 # HELP peren_placement_available Whether this listener is serving and eligible for new placement.\n\
 # TYPE peren_placement_available gauge\n\
 peren_placement_available {}\n",
-        placement_weight.max(1),
+        placement_weight,
         u8::from(placement_available),
     );
     counter(
