@@ -149,6 +149,9 @@ fn environment_references(binding: &peren_config::Binding) -> Vec<&str> {
             ..
         }
         | peren_config::Binding::AwsSigv4 {
+            credential_source:
+                peren_config::CredentialsSource::Configured
+                | peren_config::CredentialsSource::Environment,
             access_key_env,
             secret_key_env,
             token_env,

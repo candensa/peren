@@ -35,6 +35,51 @@ fn eks_pod_identity_is_a_supported_s3_credential_source() {
 }
 
 #[test]
+fn s3_bucket_static_credentials_require_distinct_environment_references() {
+    let source = MINIMAL.replace(
+        "kind = \"memory\"",
+        r#"kind = "s3"
+bucket = "fleet"
+endpoint = "https://s3.us-east-1.amazonaws.com"
+credentials_source = "configured"
+access_key_env = "FLEET_BUCKET_KEY"
+secret_key_env = "FLEET_BUCKET_KEY""#,
+    );
+
+    let error = FleetConfig::from_toml(&source)
+        .unwrap()
+        .validate()
+        .unwrap_err();
+
+    assert!(error.problems().iter().any(|problem| {
+        problem.field == "bucket.secret_key_env"
+            && problem.message.contains("different environment variable")
+    }));
+}
+
+#[test]
+fn azure_blob_bucket_rejects_ambient_credential_sources() {
+    let source = MINIMAL.replace(
+        "kind = \"memory\"",
+        r#"kind = "azure_blob"
+bucket = "fleet"
+credentials_source = "workload_identity"
+azure_account_env = "AZURE_STORAGE_ACCOUNT"
+azure_access_key_env = "AZURE_STORAGE_ACCESS_KEY""#,
+    );
+
+    let error = FleetConfig::from_toml(&source)
+        .unwrap()
+        .validate()
+        .unwrap_err();
+
+    assert!(error.problems().iter().any(|problem| {
+        problem.field == "bucket.credentials_source"
+            && problem.message == "Azure Blob buckets require configured environment credentials"
+    }));
+}
+
+#[test]
 fn current_representative_config_resolves_references() {
     let config = FleetConfig::from_toml(REPRESENTATIVE)
         .unwrap()
@@ -265,6 +310,30 @@ prefix = "images/"
         peren_config::Binding::R2Bucket { notifications, .. }
         if notifications.len() == 1
     ));
+}
+
+#[test]
+fn aws_sigv4_static_credentials_are_validated_independently_from_bucket_credentials() {
+    let bindings = r#"
+[services.bindings.AWS]
+type = "aws_sigv4"
+credential_source = "environment"
+region = "us-east-1"
+service = "bedrock"
+allowed_hosts = ["bedrock-runtime.us-east-1.amazonaws.com"]
+access_key_env = "AWS_ACCESS_KEY_ID"
+"#;
+    let source = MINIMAL.replace("[[sockets]]", &format!("{bindings}\n[[sockets]]"));
+
+    let error = FleetConfig::from_toml(&source)
+        .unwrap()
+        .validate()
+        .unwrap_err();
+
+    assert!(error.problems().iter().any(|problem| {
+        problem.field == "services[0].bindings.AWS.secret_key_env"
+            && problem.message == "field is required for the selected provider"
+    }));
 }
 
 #[test]

@@ -59,49 +59,14 @@ impl Providers {
                     allow_http: config.raw.bucket.allow_http,
                     virtual_hosted: false,
                 };
-                let store = match config.raw.bucket.credentials_source {
-                    CredentialsSource::Configured | CredentialsSource::Environment => {
-                        let access_name = required(
-                            config.raw.bucket.access_key_env.as_deref(),
-                            "bucket.access_key_env",
-                        )?;
-                        let secret_name = required(
-                            config.raw.bucket.secret_key_env.as_deref(),
-                            "bucket.secret_key_env",
-                        )?;
-                        let access_key = secret(environment, access_name)?;
-                        let secret_key = secret(environment, secret_name)?;
-                        BucketStore::s3(options, S3Credentials::new(access_key, secret_key, None))?
-                    }
-                    CredentialsSource::InstanceRole
-                    | CredentialsSource::WorkloadIdentity
-                    | CredentialsSource::EksPodIdentity => BucketStore::s3_instance_role(options)?,
-                };
+                let store = s3_bucket_store(config, environment, options)?;
                 store
                     .verify_cas(&format!("startup-{}", config.raw.node.id.simple()))
                     .await?;
                 Repository::Bucket(store)
             }
             BucketKind::AzureBlob => {
-                let account_name = required(
-                    config.raw.bucket.azure_account_env.as_deref(),
-                    "bucket.azure_account_env",
-                )?;
-                let access_key_name = required(
-                    config.raw.bucket.azure_access_key_env.as_deref(),
-                    "bucket.azure_access_key_env",
-                )?;
-                let account = secret(environment, account_name)?;
-                let access_key = secret(environment, access_key_name)?;
-                let store = BucketStore::azure(
-                    AzureOptions {
-                        account,
-                        container: required(config.raw.bucket.name.clone(), "bucket.bucket")?,
-                        endpoint: config.raw.bucket.endpoint.clone(),
-                        emulator: config.raw.bucket.azure_emulator,
-                    },
-                    AzureCredentials::new(access_key),
-                )?;
+                let store = azure_bucket_store(config, environment)?;
                 store
                     .verify_cas(&format!("startup-{}", config.raw.node.id.simple()))
                     .await?;
@@ -133,6 +98,69 @@ impl Providers {
     }
 }
 
+fn s3_bucket_store(
+    config: &ValidatedConfig,
+    environment: &impl Environment,
+    options: S3Options,
+) -> Result<BucketStore, ProviderError> {
+    match config.raw.bucket.credentials_source {
+        CredentialsSource::Configured | CredentialsSource::Environment => {
+            let access_name = required(
+                config.raw.bucket.access_key_env.as_deref(),
+                "bucket.access_key_env",
+            )?;
+            let secret_name = required(
+                config.raw.bucket.secret_key_env.as_deref(),
+                "bucket.secret_key_env",
+            )?;
+            let access_key = secret(environment, access_name)?;
+            let secret_key = secret(environment, secret_name)?;
+            BucketStore::s3(options, S3Credentials::new(access_key, secret_key, None))
+                .map_err(ProviderError::from)
+        }
+        CredentialsSource::InstanceRole
+        | CredentialsSource::WorkloadIdentity
+        | CredentialsSource::EksPodIdentity => {
+            BucketStore::s3_instance_role(options).map_err(ProviderError::from)
+        }
+    }
+}
+
+fn azure_bucket_store(
+    config: &ValidatedConfig,
+    environment: &impl Environment,
+) -> Result<BucketStore, ProviderError> {
+    if !matches!(
+        config.raw.bucket.credentials_source,
+        CredentialsSource::Configured | CredentialsSource::Environment
+    ) {
+        return Err(ProviderError::UnsupportedCredentialSource {
+            provider: "Azure Blob",
+            credentials_source: config.raw.bucket.credentials_source,
+        });
+    }
+    let account_name = required(
+        config.raw.bucket.azure_account_env.as_deref(),
+        "bucket.azure_account_env",
+    )?;
+    let access_key_name = required(
+        config.raw.bucket.azure_access_key_env.as_deref(),
+        "bucket.azure_access_key_env",
+    )?;
+    let account = secret(environment, account_name)?;
+    let access_key = secret(environment, access_key_name)?;
+    BucketStore::azure(
+        AzureOptions {
+            account,
+            container: required(config.raw.bucket.name.clone(), "bucket.bucket")?,
+            endpoint: config.raw.bucket.endpoint.clone(),
+            emulator: config.raw.bucket.azure_emulator,
+        },
+        AzureCredentials::new(access_key),
+    )
+    .map_err(ProviderError::from)
+}
+
 mod secret;
 use secret::{collect, required, resolve_compatibility, secret};
 
@@ -153,6 +181,11 @@ pub enum ProviderError {
     MissingField(&'static str),
     #[error("required environment variable {0:?} is not set")]
     MissingEnvironment(String),
+    #[error("{provider} bucket does not support credentials_source {credentials_source:?}")]
+    UnsupportedCredentialSource {
+        provider: &'static str,
+        credentials_source: CredentialsSource,
+    },
     #[error(transparent)]
     Build(#[from] peren_provider_object_store::BuildError),
     #[error("object provider returned an invalid range read")]
@@ -290,6 +323,25 @@ service = "api"
         assert_eq!(
             error.to_string(),
             "required environment variable \"AZURE_STORAGE_ACCOUNT\" is not set"
+        );
+    }
+
+    #[tokio::test]
+    async fn azure_blob_provider_rejects_ambient_credential_sources_before_secret_resolution() {
+        let mut config = config(false);
+        config.raw.bucket.kind = BucketKind::AzureBlob;
+        config.raw.bucket.credentials_source = CredentialsSource::WorkloadIdentity;
+        config.raw.bucket.name = Some("fleet".into());
+        config.raw.bucket.azure_account_env = Some("AZURE_STORAGE_ACCOUNT".into());
+        config.raw.bucket.azure_access_key_env = Some("AZURE_STORAGE_ACCESS_KEY".into());
+
+        let Err(error) = Providers::build(&config, &MapEnvironment(BTreeMap::new())).await else {
+            panic!("Azure Blob provider unexpectedly accepted workload identity");
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "Azure Blob bucket does not support credentials_source WorkloadIdentity"
         );
     }
 

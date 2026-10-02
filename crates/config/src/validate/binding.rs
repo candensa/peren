@@ -129,27 +129,25 @@ fn validate(
             super::provider::ai(provider, &field, problems);
         }
         crate::Binding::AwsSigv4 {
+            credential_source,
             allowed_hosts,
             region,
             service,
+            access_key_env,
+            secret_key_env,
+            token_env,
             ..
-        } => {
-            if allowed_hosts.is_empty() {
-                problems.push(Problem::new(
-                    format!("{field}.allowed_hosts"),
-                    "must contain at least one host",
-                ));
-            }
-            if region.trim().is_empty() {
-                problems.push(Problem::new(format!("{field}.region"), "must not be empty"));
-            }
-            if service.trim().is_empty() {
-                problems.push(Problem::new(
-                    format!("{field}.service"),
-                    "must not be empty",
-                ));
-            }
-        }
+        } => validate_aws_sigv4(
+            &field,
+            *credential_source,
+            allowed_hosts,
+            region,
+            service,
+            access_key_env.as_ref(),
+            secret_key_env.as_ref(),
+            token_env.as_ref(),
+            problems,
+        ),
         crate::Binding::Hyperdrive {
             pool_max_connections: 0,
             ..
@@ -179,5 +177,59 @@ fn validate(
             ));
         }
         _ => {}
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_aws_sigv4(
+    field: &str,
+    credential_source: crate::CredentialsSource,
+    allowed_hosts: &[String],
+    region: &str,
+    service: &str,
+    access_key_env: Option<&String>,
+    secret_key_env: Option<&String>,
+    token_env: Option<&String>,
+    problems: &mut Vec<Problem>,
+) {
+    if allowed_hosts.is_empty() {
+        problems.push(Problem::new(
+            format!("{field}.allowed_hosts"),
+            "must contain at least one host",
+        ));
+    }
+    if region.trim().is_empty() {
+        problems.push(Problem::new(format!("{field}.region"), "must not be empty"));
+    }
+    if service.trim().is_empty() {
+        problems.push(Problem::new(
+            format!("{field}.service"),
+            "must not be empty",
+        ));
+    }
+    if matches!(
+        credential_source,
+        crate::CredentialsSource::Configured | crate::CredentialsSource::Environment
+    ) {
+        super::required(access_key_env, &format!("{field}.access_key_env"), problems);
+        super::required(secret_key_env, &format!("{field}.secret_key_env"), problems);
+        if access_key_env
+            .zip(secret_key_env)
+            .is_some_and(|(access_key_env, secret_key_env)| access_key_env == secret_key_env)
+        {
+            problems.push(Problem::new(
+                format!("{field}.secret_key_env"),
+                "must reference a different environment variable than access_key_env",
+            ));
+        }
+        if token_env.is_some_and(|token_env| {
+            access_key_env.is_some_and(|access_key_env| token_env == access_key_env)
+                || secret_key_env.is_some_and(|secret_key_env| token_env == secret_key_env)
+        }) {
+            problems.push(Problem::new(
+                format!("{field}.token_env"),
+                "must reference a distinct environment variable",
+            ));
+        }
     }
 }
