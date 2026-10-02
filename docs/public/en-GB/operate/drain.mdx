@@ -51,7 +51,7 @@ peren node remove peren.toml --node 00000000-0000-0000-0000-000000000001
 
 Without `--force`, removal refuses unless a prior drain record exists for that node. Pass `--force` only when the operator has already accepted that the drain precondition will be skipped.
 
-Do not delete local data until durable recovery state exists elsewhere, or until the live control report shows `disk_removal_safe` after a peer drain. A node with active WebSocket residency is not disk-removal safe.
+Do not delete local data until durable recovery state exists elsewhere and the live control report shows `disk_removal_safe` after a peer drain. A node with active WebSocket residency is not disk-removal safe.
 
 ## Verification
 
