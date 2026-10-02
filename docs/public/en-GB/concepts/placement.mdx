@@ -3,7 +3,7 @@ title: "Placement"
 description: "Ownership as the permission to commit, distinct from any placement preference."
 ---
 
-Ownership decides which node may commit state for a cell. Placement preference would decide which node is a good candidate to run that work. Peren enforces ownership through the bucket. It does not currently implement a placement sampler that chooses nodes by weight, region or cache warmth.
+Ownership decides which node may commit state for a cell. Placement preference describes whether a node is a good candidate to run new work. Peren enforces ownership through the bucket and reports live placement pressure from the running node. It does not move cells between nodes in this release.
 
 <SystemDiagram name="placement" />
 
@@ -15,8 +15,18 @@ When the ownership record has no owner, any node that can reach the bucket may a
 
 ## Preference versus permission
 
-Configuration may carry placement-related fields for future or operator tooling. Those fields are not a live placement policy in this release. Do not treat them as a guarantee that work lands on a particular node. The permission that matters for durability is ownership.
+`[rebalance].placement_weight` is a pressure input reported by the node. A higher weight makes the node appear less pressured for the same active work and resident WebSocket count. A missing weight is reported as `100`.
 
-`peren node drain` records a draining state in the local fleet registry. It does not move cells and it does not change admission on an already running process. There is no operator command that relocates a cell between nodes.
+The live peer control report includes `placement_weight`, `websocket_resident`, and `placement_pressure`. Nodes in `draining` or `control_only` admission report maximum placement pressure and are not eligible for new placement. The `/metrics` endpoint also exports `peren_placement_weight` and `peren_placement_available` for scraping.
+
+Placement pressure is advisory. The permission that matters for durability is still ownership. When the ownership record has no owner, any node that can reach the bucket may acquire the cell and restore it.
+
+## Drain and movement
+
+`peren node drain` records a draining state in the local fleet registry. It does not move cells and it does not change admission on an already running process.
+
+The live peer drain endpoint changes the running process: readiness becomes false, new top-level work is refused, and placement availability becomes false. In-flight work may finish. WebSocket-resident cells stay on the drained node until the socket closes; messages on those existing sockets continue to dispatch to that resident cell. New WebSocket upgrades are refused after drain because they require top-level admission.
+
+There is no operator command that relocates a cell between nodes. After a resident cell has no active WebSocket session and no active top-level work, another node can acquire it on a later request through the normal ownership and restore path.
 
 Read [Architecture](/docs/concepts/architecture/) for the request path and [Recovery after node loss](/docs/state/recovery/) for what happens after a node stops.

@@ -35,7 +35,9 @@ That call sets readiness false and admission to draining on the running process.
 
 If `[control].require_signed_mutations = true`, the same request must include Peren control-signature headers. The signature targets the node id and covers the method, path, request body, timestamp, and nonce. Unsigned live drain requests return `401` in that mode.
 
-Response fields include `admission`, `ready`, `active`, `disk_removal_safe`, and `retired`. `disk_removal_safe` is true when the listener is not ready and active work is zero.
+Response fields include `admission`, `ready`, `active`, `websocket_resident`, `placement_weight`, `placement_pressure`, `disk_removal_safe`, and `retired`. `placement_pressure` is maximum while the node is draining or control-only. `disk_removal_safe` is true when the listener is not ready, active work is zero, and no WebSocket-resident cells remain.
+
+Existing WebSocket sessions are not moved by drain. They remain attached to their resident cell until the socket closes, and messages on those sockets continue to dispatch on the drained node. New WebSocket upgrades are refused after drain because they require top-level admission.
 
 The `peren` CLI drain command performs the registry write. It does not call the peer control endpoint.
 
@@ -49,7 +51,7 @@ peren node remove peren.toml --node 00000000-0000-0000-0000-000000000001
 
 Without `--force`, removal refuses unless a prior drain record exists for that node. Pass `--force` only when the operator has already accepted that the drain precondition will be skipped.
 
-Do not delete local data until durable recovery state exists elsewhere, or until the live control report shows `disk_removal_safe` after a peer drain.
+Do not delete local data until durable recovery state exists elsewhere and the live control report shows `disk_removal_safe` after a peer drain. A node with active WebSocket residency is not disk-removal safe.
 
 ## Verification
 

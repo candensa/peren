@@ -195,9 +195,9 @@ Optional table.
 | Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
 | --- | --- | --- | --- | --- | --- | --- |
 | `rebalance.interval_secs` | u64 | no | `5` | non-negative integer | accepted in config | type errors fail parse |
-| `rebalance.placement_weight` | u32 | no | unset | non-negative integer | accepted in config | type errors fail parse |
+| `rebalance.placement_weight` | u32 | no | unset | non-negative integer | placement pressure report | type errors fail parse |
 
-This build stores these fields. The live placement path does not read them in the current node process.
+This build reports `placement_weight` through the peer control plane and `/metrics`. It affects the live placement pressure value operators use during drain and admission decisions. It does not move cells between nodes.
 
 ## `[queues]`
 

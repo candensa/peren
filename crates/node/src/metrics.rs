@@ -146,6 +146,7 @@ pub(crate) fn render(
     metrics: &Metrics,
     admission: Option<AdmissionSnapshot>,
     websocket_active: usize,
+    placement_weight: u32,
 ) -> String {
     let telemetry = &metrics.telemetry;
     let admission_capacity = admission.map_or(0, |snapshot| snapshot.capacity);
@@ -154,6 +155,8 @@ pub(crate) fn render(
     let admission_admitted = admission.map_or(0, |snapshot| snapshot.admitted);
     let admission_completed = admission.map_or(0, |snapshot| snapshot.completed);
     let admission_refused = admission.map_or(0, |snapshot| snapshot.refused);
+    let placement_available = admission
+        .is_some_and(|snapshot| ready && matches!(snapshot.mode, crate::admission::Mode::Serving));
     let uptime_seconds = now_ms().saturating_sub(metrics.started_at_ms) / 1000;
     let websocket_active = u64::try_from(websocket_active).unwrap_or(u64::MAX);
     let listener = label(&metrics.listener);
@@ -216,6 +219,17 @@ peren_admission_refused_total {}\n",
         admission_admitted,
         admission_completed,
         admission_refused,
+    );
+    let _ = write!(
+        output,
+        "# HELP peren_placement_weight Configured placement weight for this node.\n\
+# TYPE peren_placement_weight gauge\n\
+peren_placement_weight {}\n\
+# HELP peren_placement_available Whether this listener is serving and eligible for new placement.\n\
+# TYPE peren_placement_available gauge\n\
+peren_placement_available {}\n",
+        placement_weight,
+        u8::from(placement_available),
     );
     counter(
         &mut output,
@@ -545,7 +559,7 @@ mod tests {
             telemetry,
         };
 
-        let output = render(true, &metrics, None, 0);
+        let output = render(true, &metrics, None, 0, 100);
 
         assert!(output.contains("peren_kv_operations_total 2"));
         assert!(output.contains("peren_kv_errors_total 1"));
@@ -558,5 +572,6 @@ mod tests {
         assert!(output.contains("peren_outbound_fetches_total 3"));
         assert!(output.contains("peren_outbound_errors_total 1"));
         assert!(output.contains("peren_outbound_duration_ms_total 11"));
+        assert!(output.contains("peren_placement_weight 100"));
     }
 }

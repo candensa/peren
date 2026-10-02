@@ -378,7 +378,10 @@ struct NodeControlReport {
     listener: String,
     ready: bool,
     admission: &'static str,
+    placement_weight: u32,
     active: u64,
+    websocket_resident: u64,
+    placement_pressure: u64,
     incarnation: String,
     disk_removal_safe: bool,
     retired: bool,
@@ -601,14 +604,28 @@ fn peer_report(app: &App) -> Option<NodeControlReport> {
     }
     let snapshot = app.admission.snapshot();
     let ready = app.readiness.load(Ordering::Acquire);
+    let websocket_resident = app
+        .websocket_sessions
+        .len()
+        .map_or(u64::MAX, |count| u64::try_from(count).unwrap_or(u64::MAX));
+    let placement_weight = app.config.raw.rebalance.placement_weight.unwrap_or(100);
+    let placement_pressure = placement_pressure(
+        snapshot.active,
+        websocket_resident,
+        placement_weight,
+        snapshot.mode,
+    );
     Some(NodeControlReport {
         node: app.node.as_uuid().to_string(),
         listener: app.metrics.listener.to_string(),
         ready,
         admission: admission_name(snapshot.mode),
+        placement_weight,
         active: snapshot.active,
+        websocket_resident,
+        placement_pressure,
         incarnation: app.incarnation.to_string(),
-        disk_removal_safe: !ready && snapshot.active == 0,
+        disk_removal_safe: !ready && snapshot.active == 0 && websocket_resident == 0,
         retired: app.retired.load(Ordering::Acquire),
     })
 }
@@ -739,17 +756,32 @@ fn admission_name(mode: AdmissionMode) -> &'static str {
     }
 }
 
+fn placement_pressure(
+    active: u64,
+    websocket_resident: u64,
+    placement_weight: u32,
+    mode: AdmissionMode,
+) -> u64 {
+    if mode != AdmissionMode::Serving {
+        return u64::MAX;
+    }
+    let base = u64::from(placement_weight.max(1));
+    active
+        .saturating_mul(1_000)
+        .saturating_add(websocket_resident.saturating_mul(5_000))
+        .saturating_div(base)
+}
+
 pub(super) async fn metrics(State(app): State<App>) -> impl IntoResponse {
     let socket = app.socket.as_ref();
     let admission = socket.map(|socket| socket.admission.snapshot());
-    let websocket_active = socket
-        .and_then(|socket| socket.websocket_sessions.len().ok())
-        .unwrap_or(0);
+    let websocket_active = app.websocket_sessions.len().unwrap_or(0);
     let body = crate::metrics::render(
         app.readiness.load(Ordering::Acquire),
         &app.metrics,
         admission,
         websocket_active,
+        app.config.raw.rebalance.placement_weight.unwrap_or(100),
     );
     (
         [(

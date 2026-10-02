@@ -282,9 +282,15 @@ async fn dispatch_upgrade(app: App, socket: SocketApp, request: UpgradeRequest) 
                 started,
             );
             let session = accepted.session.clone();
-            let response = websocket::response(&response_headers, accepted.response)
+            let response = match websocket::response(&response_headers, accepted.response)
                 .map_err(ProcessError::WebSocketSession)
-                .unwrap_or_else(IntoResponse::into_response);
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    let _ = bridge_socket.websocket_sessions.remove(&session.host_id);
+                    error.into_response()
+                }
+            };
             tokio::spawn(async move {
                 if let Ok(upgraded) = on_upgrade.await {
                     let stream = WebSocketStream::from_raw_socket(
@@ -294,6 +300,8 @@ async fn dispatch_upgrade(app: App, socket: SocketApp, request: UpgradeRequest) 
                     )
                     .await;
                     bridge(stream, bridge_socket, session).await;
+                } else {
+                    let _ = bridge_socket.websocket_sessions.remove(&session.host_id);
                 }
             });
             response
@@ -331,7 +339,7 @@ async fn bridge(
     app: SocketApp,
     session: WebSocketSession,
 ) {
-    let session_id = session.id.clone();
+    let session_id = session.host_id.clone();
     while let Some(message) = stream.next().await {
         match message {
             Ok(Message::Text(text)) => {
@@ -540,7 +548,7 @@ pub(crate) async fn dispatch_worker(
     let session_cell = dispatch.cell;
     let session_path = path.clone();
     let dispatch = dispatch_cell(app, dispatch).await?;
-    let response = dispatch.response;
+    let mut response = dispatch.response;
     record_tail(TailRecord {
         tail: &tail_path,
         service: &service_name,
@@ -566,17 +574,25 @@ pub(crate) async fn dispatch_worker(
     )?;
     if upgrade && response.upgrade {
         if let Some(session) = response.websocket_id.as_ref() {
-            let inserted = websocket_sessions.record(WebSocketSession {
+            let recorded = websocket_sessions.record(WebSocketSession {
+                host_id: String::new(),
                 id: session.clone(),
                 service: service_name.clone(),
                 path: session_path.clone(),
                 cell: session_cell,
             })?;
-            if inserted {
-                Telemetry::inc(&telemetry.websocket_sessions);
+            Telemetry::inc(&telemetry.websocket_sessions);
+            response.websocket_id = Some(recorded.host_id.clone());
+            match websocket::response(&headers, response).map_err(ProcessError::WebSocketSession) {
+                Ok(response) => Ok(response),
+                Err(error) => {
+                    let _ = websocket_sessions.remove(&recorded.host_id);
+                    Err(error)
+                }
             }
+        } else {
+            websocket::response(&headers, response).map_err(ProcessError::WebSocketSession)
         }
-        websocket::response(&headers, response).map_err(ProcessError::WebSocketSession)
     } else {
         response_body(response)
     }

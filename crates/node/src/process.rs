@@ -50,6 +50,7 @@ pub(super) struct App {
     pub(super) retired: Arc<AtomicBool>,
     pub(super) metrics: Metrics,
     pub(super) admission: Admission,
+    pub(super) websocket_sessions: Arc<WebSocketRegistry>,
     pub(super) socket: Option<SocketApp>,
     pub(super) dev_inspector: bool,
     pub(super) control_replay: ControlReplay,
@@ -165,6 +166,7 @@ struct SocketContext<'a> {
     telemetry: Arc<Telemetry>,
     trace: trace::TraceSink,
     admission: Admission,
+    websocket_sessions: Arc<WebSocketRegistry>,
 }
 
 mod queue;
@@ -316,6 +318,7 @@ impl Process {
         ));
         let objects = Arc::new(durable_services(&control_config.raw.services));
         let registry = Arc::new(StdMutex::new(BTreeMap::new()));
+        let websocket_sessions = Arc::new(WebSocketRegistry::default());
 
         let readiness = Arc::new(AtomicBool::new(false));
         let retired = Arc::new(AtomicBool::new(false));
@@ -347,6 +350,7 @@ impl Process {
                     telemetry: Arc::clone(&telemetry),
                 },
                 admission: admission.clone(),
+                websocket_sessions: Arc::clone(&websocket_sessions),
                 socket: None,
                 dev_inspector: options.dev_inspector,
                 control_replay: Arc::clone(&control_replay),
@@ -385,6 +389,7 @@ impl Process {
                         telemetry: Arc::clone(&telemetry),
                     },
                     admission: admission.clone(),
+                    websocket_sessions: Arc::clone(&websocket_sessions),
                     dev_inspector: options.dev_inspector,
                     control_replay: Arc::clone(&control_replay),
                     socket: Some(socket_app(
@@ -414,6 +419,7 @@ impl Process {
                             telemetry: Arc::clone(&telemetry),
                             trace: trace.clone(),
                             admission: admission.clone(),
+                            websocket_sessions: Arc::clone(&websocket_sessions),
                         },
                         bundle,
                         service,
@@ -444,6 +450,7 @@ impl Process {
                         telemetry: Arc::clone(&telemetry),
                     },
                     admission: admission.clone(),
+                    websocket_sessions: Arc::clone(&websocket_sessions),
                     socket: None,
                     dev_inspector: options.dev_inspector,
                     control_replay: Arc::clone(&control_replay),
@@ -611,7 +618,7 @@ fn socket_app(context: SocketContext<'_>, bundle: WorkerBundle, service: &str) -
         services: context.services,
         objects: context.objects,
         registry: context.registry,
-        websocket_sessions: Arc::new(WebSocketRegistry::default()),
+        websocket_sessions: context.websocket_sessions,
         telemetry: context.telemetry,
         admission: context.admission,
     }
