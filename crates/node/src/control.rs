@@ -607,8 +607,7 @@ fn peer_report(app: &App) -> Option<NodeControlReport> {
     let websocket_resident = app
         .websocket_sessions
         .len()
-        .map(|count| u64::try_from(count).unwrap_or(u64::MAX))
-        .unwrap_or(0);
+        .map_or(0, |count| u64::try_from(count).unwrap_or(u64::MAX));
     let placement_weight = app.config.raw.rebalance.placement_weight.unwrap_or(100);
     let placement_pressure = placement_pressure(
         snapshot.active,
