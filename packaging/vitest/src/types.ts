@@ -304,9 +304,17 @@ export interface DurableObjectId {
 
 export interface DurableObjectStub extends Fetcher {}
 
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
 export interface DurableObjectGetOptions {
-  props?: Record<string, unknown>;
-  startupProps?: Record<string, unknown>;
+  props?: Record<string, JsonValue>;
+  startupProps?: Record<string, JsonValue>;
 }
 
 export interface DurableObjectNamespace {
