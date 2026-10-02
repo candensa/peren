@@ -46,6 +46,7 @@ ObjectDefineProperties(globalThis, {
   ReadableStream: core.propNonEnumerable(streams.ReadableStream),
   Request: core.propNonEnumerable(request.Request),
   Response: core.propNonEnumerable(response.Response),
+  self: core.propNonEnumerable(globalThis),
   setImmediate: core.propNonEnumerable(setImmediateCompat),
   setInterval: core.propNonEnumerable(timers.setInterval),
   setTimeout: core.propNonEnumerable(timers.setTimeout),
@@ -213,4 +214,3 @@ const kvValue = (value) => Object.freeze({
   json: async () => JSON.parse(decodeText(value)),
   text: async () => decodeText(value),
 });
-

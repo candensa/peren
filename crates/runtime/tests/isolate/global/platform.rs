@@ -1,6 +1,55 @@
 use super::super::support::*;
 
 #[tokio::test(flavor = "current_thread")]
+async fn self_global_aliases_global_this_without_enumerating() {
+    let mut runtime = WorkerRuntime::load(
+        bundle(
+            r#"
+        export default {
+          async fetch() {
+            const descriptor = Object.getOwnPropertyDescriptor(globalThis, "self");
+            return Response.json({
+              same: self === globalThis,
+              writable: descriptor.writable,
+              enumerable: descriptor.enumerable,
+              configurable: descriptor.configurable,
+              hasOwn: Object.prototype.hasOwnProperty.call(globalThis, "self"),
+            });
+          }
+        };
+        "#,
+        ),
+        limits(),
+    )
+    .await
+    .unwrap();
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.invalid/self".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(1024, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({
+            "same": true,
+            "writable": true,
+            "enumerable": false,
+            "configurable": true,
+            "hasOwn": true,
+        })
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn blob_and_file_globals_follow_file_api_basics() {
     let mut runtime = WorkerRuntime::load(
         bundle(

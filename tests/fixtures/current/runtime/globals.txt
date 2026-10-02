@@ -67,4 +67,5 @@ performance
 setImmediate
 setInterval
 setTimeout
+self
 structuredClone

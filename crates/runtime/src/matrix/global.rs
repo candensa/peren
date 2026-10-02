@@ -153,7 +153,7 @@ pub(super) const KVNAMESPACE: RuntimeCapability = global(
 pub(super) const LOADER: RuntimeCapability = global(
     "Loader",
     CapabilityStatus::Supported,
-    "Loader bindings expose guarded dynamic import for bundled relative modules",
+    "Loader bindings expose guarded dynamic import, entrypoint lookup, and Durable Object class lookup for bundled relative modules",
 );
 
 pub(super) const MESSAGECHANNEL: RuntimeCapability = global(
@@ -412,6 +412,12 @@ pub(super) const SETTIMEOUT: RuntimeCapability = global(
     "setTimeout",
     CapabilityStatus::Supported,
     "web timer globals are exposed and dispatch-tested",
+);
+
+pub(super) const SELF: RuntimeCapability = global(
+    "self",
+    CapabilityStatus::Supported,
+    "self aliases globalThis as a non-enumerable Worker global in isolate tests",
 );
 
 pub(super) const STRUCTUREDCLONE: RuntimeCapability = global(

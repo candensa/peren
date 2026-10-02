@@ -63,7 +63,7 @@ pub(super) const KV: RuntimeCapability = binding(
 pub(super) const LOADER: RuntimeCapability = binding(
     "loader",
     CapabilityStatus::Supported,
-    "Loader bindings expose guarded dynamic import for bundled relative modules",
+    "Loader bindings expose guarded dynamic import, entrypoint lookup, and Durable Object class lookup for bundled relative modules",
 );
 
 pub(super) const MTLS_CERTIFICATE: RuntimeCapability = binding(
