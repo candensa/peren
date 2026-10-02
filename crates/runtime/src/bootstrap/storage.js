@@ -20,6 +20,12 @@ const normalizeCursor = (value) => {
   return String(value);
 };
 
+const kvListKey = (key) => {
+  const projected = { name: String(key.name) };
+  if (key.metadata !== undefined && key.metadata !== null) projected.metadata = key.metadata;
+  return ObjectFreeze(projected);
+};
+
 const kvPutBytes = (value) => {
   if (value instanceof ArrayBuffer) return Array.from(new Uint8Array(value));
   if (ArrayBuffer.isView(value)) return Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
@@ -135,10 +141,7 @@ class KvNamespace {
         limit: normalizeListLimit(options.limit),
       });
       return {
-        keys: page.keys.map((key) => ObjectFreeze({
-          name: String(key.name),
-          metadata: key.metadata ?? undefined,
-        })),
+        keys: page.keys.map(kvListKey),
         cursor: page.cursor === null ? undefined : decodeText(new Uint8Array(page.cursor)),
         list_complete: page.listComplete,
       };
@@ -151,10 +154,7 @@ class KvNamespace {
     if (limit !== undefined) request.limit = limit;
     const page = await core.ops.op_storage_list(this.scope, request);
     return {
-      keys: page.keys.map((key) => ObjectFreeze({
-        name: String(key.name),
-        metadata: key.metadata ?? undefined,
-      })),
+      keys: page.keys.map(kvListKey),
       cursor: page.cursor === null ? undefined : decodeText(new Uint8Array(page.cursor)),
       list_complete: page.listComplete,
     };

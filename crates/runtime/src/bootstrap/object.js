@@ -104,7 +104,11 @@ function readDurableValue(bytes) {
 }
 
 function durableObjectStorage(inner) {
-  const wrapTransaction = (callback, method = "transaction") => inner[method](async (transaction) => {
+  const wrapTransaction = (callback) => inner.transaction(async (transaction) => {
+    const scoped = durableObjectTransactionStorage(transaction);
+    return await callback(scoped);
+  });
+  const wrapMutation = (id, callback) => inner.mutation(id, async (transaction) => {
     const scoped = durableObjectTransactionStorage(transaction);
     return await callback(scoped);
   });
@@ -118,7 +122,7 @@ function durableObjectStorage(inner) {
     delete: (key, options) => inner.delete(key, options),
     deleteAll: (options) => inner.deleteAll(options),
     transaction: (callback) => wrapTransaction(callback),
-    mutation: (id, callback) => wrapTransaction(callback, "mutation"),
+    mutation: (id, callback) => wrapMutation(id, callback),
   });
 }
 
