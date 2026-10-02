@@ -8,6 +8,24 @@ const kvReadValue = (value, options = {}) => {
   return decodeText(bytes);
 };
 
+const normalizeListLimit = (value, fallback = undefined) => {
+  if (value === undefined || value === null) return fallback;
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new TypeError("list limit must be a positive integer");
+  return limit;
+};
+
+const normalizeCursor = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  return String(value);
+};
+
+const kvListKey = (key) => {
+  const projected = { name: String(key.name) };
+  if (key.metadata !== undefined && key.metadata !== null) projected.metadata = key.metadata;
+  return ObjectFreeze(projected);
+};
+
 const kvPutBytes = (value) => {
   if (value instanceof ArrayBuffer) return Array.from(new Uint8Array(value));
   if (ArrayBuffer.isView(value)) return Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
@@ -119,22 +137,24 @@ class KvNamespace {
       const page = await core.ops.op_kv_list({
         namespace: this.scope,
         prefix: options.prefix === undefined ? undefined : String(options.prefix),
-        cursor: options.cursor === undefined ? undefined : String(options.cursor),
-        limit: options.limit === undefined ? undefined : Number(options.limit),
+        cursor: normalizeCursor(options.cursor),
+        limit: normalizeListLimit(options.limit),
       });
       return {
-        keys: page.keys,
+        keys: page.keys.map(kvListKey),
         cursor: page.cursor === null ? undefined : decodeText(new Uint8Array(page.cursor)),
         list_complete: page.listComplete,
       };
     }
     const request = {};
     if (options.prefix !== undefined) request.prefix = ArrayFrom(encodeStorageBytes(String(options.prefix)));
-    if (options.cursor !== undefined) request.cursor = ArrayFrom(encodeStorageBytes(String(options.cursor)));
-    if (options.limit !== undefined) request.limit = Number(options.limit);
+    const cursor = normalizeCursor(options.cursor);
+    if (cursor !== undefined) request.cursor = ArrayFrom(encodeStorageBytes(cursor));
+    const limit = normalizeListLimit(options.limit);
+    if (limit !== undefined) request.limit = limit;
     const page = await core.ops.op_storage_list(this.scope, request);
     return {
-      keys: page.keys,
+      keys: page.keys.map(kvListKey),
       cursor: page.cursor === null ? undefined : decodeText(new Uint8Array(page.cursor)),
       list_complete: page.listComplete,
     };
@@ -283,34 +303,6 @@ class R2Bucket {
   async get(key) {
     return r2Object(await core.ops.op_r2_get({ bucket: this.bucket, key: `${this.prefix}${String(key)}` }));
   }
-
-  async compareAndSet(key, expected, value, options = {}) {
-    if (this.provider.kind !== "native") {
-      throw new Error("KV compareAndSet is only supported by native KV");
-    }
-    const encoded = ArrayFrom(encodeStorageBytes(String(key)));
-    await core.ops.op_storage_begin();
-    let committed = false;
-    try {
-      const current = kvDecodeRecord(await core.ops.op_storage_get(this.scope, encoded));
-      const currentVersion = current.value === null ? null : current.version;
-      const expectsMissing = expected?.missing === true;
-      const expectedVersion = expected?.version === undefined ? undefined : Number(expected.version);
-      const matched = expectsMissing ? current.value === null : expectedVersion !== undefined && currentVersion === expectedVersion;
-      if (!matched) {
-        await core.ops.op_storage_rollback();
-        committed = true;
-        return { ok: false, version: currentVersion };
-      }
-      const version = Number(currentVersion ?? 0) + 1;
-      await core.ops.op_storage_put(this.scope, encoded, kvEnvelope(value, options, version));
-      await core.ops.op_storage_commit();
-      committed = true;
-      return { ok: true, version };
-    } finally {
-      if (!committed) await core.ops.op_storage_rollback();
-    }
-  }
   async delete(key) {
     const keys = Array.isArray(key) ? key : [key];
     for (const item of keys) {
@@ -321,8 +313,8 @@ class R2Bucket {
     const page = await core.ops.op_r2_list({
       bucket: this.bucket,
       prefix: `${this.prefix}${options.prefix ?? ""}`,
-      cursor: options.cursor ?? null,
-      limit: options.limit == null ? null : Number(options.limit),
+      cursor: normalizeCursor(options.cursor) ?? null,
+      limit: normalizeListLimit(options.limit, null),
     });
     return {
       objects: page.objects.map((object) => Object.freeze({
@@ -332,6 +324,7 @@ class R2Bucket {
       })),
       cursor: page.cursor ?? undefined,
       truncated: !page.listComplete,
+      delimitedPrefixes: ObjectFreeze([]),
     };
   }
 }
@@ -346,4 +339,3 @@ globalThis.R2Bucket = R2Bucket;
 
 const doEncode = (value) => btoa(String(value));
 const doDecode = (value) => atob(String(value));
-

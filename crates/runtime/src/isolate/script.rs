@@ -30,8 +30,14 @@ pub(super) const DISPATCH_HTTP: &str = r#"
     })()
     : typeof durableClass === "function"
       ? await (async () => {
-          const state = new DurableObjectState(globalThis.Peren.storage, globalThis.__perenEnv);
+          const holder = { object: null };
+          const state = new DurableObjectState(globalThis.Peren.storage, globalThis.__perenEnv, {
+            id: null,
+            props: {},
+            exports: () => holder.object,
+          });
           const object = new durableClass(state, globalThis.__perenEnv);
+          holder.object = object;
           if (typeof object.fetch !== "function") {
             throw new TypeError("durable object class must provide fetch");
           }
@@ -169,7 +175,7 @@ pub(super) const DISPATCH_WEBSOCKET_CLOSE: &str = r#"
   return run.then(async () => {
     await globalThis.__perenDrainWaitUntil();
     const outbound = globalThis.__perenDrainWebSocketOutbound(socket);
-    socket.close(event.code, event.reason);
+    globalThis.__perenReleaseWebSocket?.(event.id, event.code, event.reason);
     await globalThis.__perenDeleteDurableWebSocket?.(event.id);
     return { outbound };
   });

@@ -32,6 +32,13 @@ class DurableObjectFacetStub {
   }
 }
 
+const durableObjectExports = (target) => rpcProxy(ObjectFreeze({}), async (method, args) => {
+  const instance = typeof target === "function" ? target() : target;
+  const member = instance?.[method];
+  if (typeof member !== "function") throw new TypeError(`Durable Object does not export ${method}`);
+  return await Promise.resolve(member.apply(instance, args));
+});
+
 class DurableObjectFacets {
   constructor(env) {
     this.env = env;
@@ -97,6 +104,14 @@ function readDurableValue(bytes) {
 }
 
 function durableObjectStorage(inner) {
+  const wrapTransaction = (callback) => inner.transaction(async (transaction) => {
+    const scoped = durableObjectTransactionStorage(transaction);
+    return await callback(scoped);
+  });
+  const wrapMutation = (id, callback) => inner.mutation(id, async (transaction) => {
+    const scoped = durableObjectTransactionStorage(transaction);
+    return await callback(scoped);
+  });
   return ObjectFreeze({
     get: async (key, options = {}) => readDurableValue(await inner.get(key, options)),
     put: async (key, value, options = {}) => {
@@ -106,16 +121,28 @@ function durableObjectStorage(inner) {
     },
     delete: (key, options) => inner.delete(key, options),
     deleteAll: (options) => inner.deleteAll(options),
-    transaction: (callback) => inner.transaction(callback),
-    mutation: (id, callback) => inner.mutation(id, callback),
+    transaction: (callback) => wrapTransaction(callback),
+    mutation: (id, callback) => wrapMutation(id, callback),
+  });
+}
+
+function durableObjectTransactionStorage(transaction) {
+  return ObjectFreeze({
+    get: async (key, options = {}) => readDurableValue(await transaction.get(key, options)),
+    put: (key, value, options = {}) => transaction.put(key, durableValue(value), options),
+    delete: (key, options) => transaction.delete(key, options),
+    deleteAll: (options) => transaction.deleteAll(options),
   });
 }
 
 class DurableObjectState {
-  constructor(storageBinding = storage, env = {}) {
+  constructor(storageBinding = storage, env = {}, options = {}) {
     this.storage = durableObjectStorage(storageBinding);
     this.facets = ObjectFreeze(new DurableObjectFacets(env));
     this.env = env;
+    this.id = options.id ?? null;
+    this.props = ObjectFreeze({ ...(options.props ?? {}) });
+    this.exports = durableObjectExports(options.exports ?? {});
   }
 
   acceptWebSocket(socket, tags = []) {
@@ -422,4 +449,3 @@ const dispatchNamespace = (binding) => {
     },
   }));
 };
-

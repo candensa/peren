@@ -90,7 +90,7 @@ async fn r2_binding_reads_writes_lists_and_deletes_objects() {
                 await env.FILES.delete(['a.txt', 'b.txt']);
                 const missing = await env.FILES.get('a.txt');
                 const missingB = await env.FILES.get('b.txt');
-                return new Response(JSON.stringify({ text: await object.text(), type: object.httpMetadata.contentType, owner: object.customMetadata.owner, listed, missing, missingB }));
+                return new Response(JSON.stringify({ text: await object.text(), type: object.httpMetadata.contentType, owner: object.customMetadata.owner, listed, missing, missingB, compareAndSet: typeof env.FILES.compareAndSet }));
             } };",
         ),
         limits(),
@@ -117,7 +117,7 @@ async fn r2_binding_reads_writes_lists_and_deletes_objects() {
 
     assert_eq!(
         response.body,
-        br#"{"text":"hello","type":"text/plain","owner":"api","listed":{"objects":[{"key":"tenant/a.txt","size":5,"customMetadata":{"owner":"api"}}],"cursor":"tenant/a.txt","truncated":true},"missing":null,"missingB":null}"#
+        br#"{"text":"hello","type":"text/plain","owner":"api","listed":{"objects":[{"key":"tenant/a.txt","size":5,"customMetadata":{"owner":"api"}}],"cursor":"tenant/a.txt","truncated":true,"delimitedPrefixes":[]},"missing":null,"missingB":null,"compareAndSet":"undefined"}"#
     );
 }
 

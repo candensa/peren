@@ -39,7 +39,7 @@ pub(super) const DISPATCHER: RuntimeCapability = binding(
 pub(super) const DURABLE_OBJECT_NAMESPACE: RuntimeCapability = binding(
     "durable_object_namespace",
     CapabilityStatus::Supported,
-    "config hydration, namespace id/stub shape, and stub fetch routing to durable object service cells are process-tested",
+    "config hydration, namespace id/stub shape, stub fetch routing to durable object service cells, in-isolate state id/props/exports ergonomics, facet RPC, and decoded storage transactions are tested; host-routed startup props require a future host protocol extension",
 );
 
 pub(super) const HYPERDRIVE: RuntimeCapability = binding(
@@ -57,7 +57,7 @@ pub(super) const IMAGES: RuntimeCapability = binding(
 pub(super) const KV: RuntimeCapability = binding(
     "kv",
     CapabilityStatus::Supported,
-    "native get/getWithMetadata/put/delete/list behavior is runtime-tested and node-routed",
+    "native get/getWithMetadata/put/delete/list behavior, metadata, expiration, versioned compare-and-set, cursor normalization, and invalid-list-limit errors are runtime-tested and node-routed",
 );
 
 pub(super) const LOADER: RuntimeCapability = binding(
@@ -87,7 +87,7 @@ pub(super) const QUEUE: RuntimeCapability = binding(
 pub(super) const R2_BUCKET: RuntimeCapability = binding(
     "r2_bucket",
     CapabilityStatus::Supported,
-    "put/get/delete/list behavior plus filtered object-create/object-delete queue notifications are tested through runtime, provider adapter, node memory route, file-backed queue proof, and explicit S3-compatible credential routing",
+    "put/get/delete/list behavior, object metadata, delete consistency, list cursor/truncation shape, explicit non-KV method surface, filtered object-create/object-delete queue notifications, provider adapter, node memory route, file-backed queue proof, and explicit S3-compatible credential routing are tested",
 );
 
 pub(super) const RATE_LIMITER: RuntimeCapability = binding(

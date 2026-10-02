@@ -194,3 +194,52 @@ async fn native_kv_binding_lists_bounded_materialized_pages() {
         br#"{"first":{"keys":[{"name":"app/one"}],"cursor":"app/one","list_complete":false},"second":{"keys":[{"name":"app/two"}],"list_complete":true}}"#
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn native_kv_binding_rejects_invalid_list_limits() {
+    let mut values = BTreeMap::new();
+    values.insert(
+        "__perenBindings".to_string(),
+        r#"{"CACHE":{"type":"kv","scope":"cache"}}"#.to_string(),
+    );
+    let mut runtime = WorkerRuntime::load_with_environment(
+        bundle(
+            "export default { async fetch(_request, env) {
+                try {
+                  await env.CACHE.list({ limit: 0 });
+                  return Response.json({ accepted: true });
+                } catch (error) {
+                  return Response.json({ accepted: false, type: error.constructor.name, message: error.message });
+                }
+            } };",
+        ),
+        limits(),
+        WorkerEnvironment::new(values),
+        Arc::new(SqlHost::new()),
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://example.com/".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(1024, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({
+            "accepted": false,
+            "type": "TypeError",
+            "message": "list limit must be a positive integer"
+        })
+    );
+}

@@ -47,6 +47,68 @@ async fn websocket_attachment_methods_persist_through_storage() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn websocket_close_orders_pending_messages_and_cleans_registry() {
+    let mut runtime = WorkerRuntime::load_with_host(
+        bundle(
+            "export default {
+              async fetch() {
+                const pair = new WebSocketPair();
+                const client = pair[0];
+                const server = pair[1];
+                const events = [];
+                client.onmessage = (event) => events.push(`message:${event.data}`);
+                client.onclose = (event) => events.push(`close:${event.code}:${event.reason}:${event.wasClean}`);
+                client.accept();
+                server.accept();
+                server.send('before-close');
+                server.close(1001, 'done');
+                let sendAfterClose = 'accepted';
+                try { server.send('after-close'); } catch (error) { sendAfterClose = error.message; }
+                await Promise.resolve();
+                await Promise.resolve();
+                return Response.json({
+                  events,
+                  sendAfterClose,
+                  serverState: server.readyState,
+                  clientState: client.readyState,
+                  session: globalThis.__perenWebSocketAttachmentId(server),
+                });
+              }
+            };",
+        ),
+        limits(),
+        Arc::new(SqlHost::new()),
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.invalid/ws-close".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({
+            "events": ["message:before-close", "close:1001:done:true"],
+            "sendAfterClose": "WebSocket is not open",
+            "serverState": 3,
+            "clientState": 3,
+            "session": "socket-2",
+        })
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn durable_object_state_rehydrates_accepted_websockets_from_storage() {
     let host = Arc::new(SqlHost::new());
     let mut first = WorkerRuntime::load_with_host(

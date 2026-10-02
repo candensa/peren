@@ -152,6 +152,7 @@ class WebSocketCloseEvent extends event.Event {
 const newSocketState = () => ({
   accepted: false,
   attachmentId: `socket-${nextSocketAttachmentId++}`,
+  closeQueued: false,
   other: null,
   readyState: WebSocketPeer.CONNECTING,
   pending: [],
@@ -219,7 +220,9 @@ class WebSocketPeer extends event.EventTarget {
   }
 
   async serializeAttachment(value) {
-    const bytes = encodeStorageBytes(JSON.stringify(value));
+    const encoded = JSON.stringify(value);
+    if (encoded === undefined) throw new TypeError("WebSocket attachment must be JSON-serializable");
+    const bytes = encodeStorageBytes(encoded);
     await core.ops.op_storage_begin();
     let committed = false;
     try {
@@ -251,12 +254,13 @@ class WebSocketPeer extends event.EventTarget {
 
   close(code = 1000, reason = "") {
     const state = socket(this);
-    if (state.readyState === WebSocketPeer.CLOSED) return;
+    if (state.readyState === WebSocketPeer.CLOSING || state.readyState === WebSocketPeer.CLOSED) return;
     state.readyState = WebSocketPeer.CLOSING;
-    finishSocketClose(this, code, String(reason), true);
+    queueSocketClose(this, code, String(reason), true);
     const other = state.other;
-    if (other !== null && socket(other).readyState !== WebSocketPeer.CLOSED) {
-      finishSocketClose(other, code, String(reason), true);
+    if (other !== null && socket(other).readyState !== WebSocketPeer.CLOSING && socket(other).readyState !== WebSocketPeer.CLOSED) {
+      socket(other).readyState = WebSocketPeer.CLOSING;
+      queueSocketClose(other, code, String(reason), true);
     }
   }
 }
@@ -268,7 +272,7 @@ WebSocketPeer.CLOSED = 3;
 
 const receiveSocketEvent = (target, event) => {
   const state = socket(target);
-  if (state.readyState === WebSocketPeer.CLOSED) return;
+  if (state.readyState === WebSocketPeer.CLOSING || state.readyState === WebSocketPeer.CLOSED) return;
   if (!state.accepted) {
     state.pending.push(event);
     return;
@@ -276,20 +280,36 @@ const receiveSocketEvent = (target, event) => {
   emitSocketEvent(target, event);
 };
 
+const queueSocketClose = (target, code, reason, wasClean) => {
+  const state = socket(target);
+  if (state.closeQueued) return;
+  state.closeQueued = true;
+  state.pending = [];
+  emitSocketEvent(target, new WebSocketCloseEvent(code, reason, wasClean), () => {
+    state.readyState = WebSocketPeer.CLOSED;
+    socketByAttachment.delete(state.attachmentId);
+  });
+};
+
 const finishSocketClose = (target, code, reason, wasClean) => {
   const state = socket(target);
+  if (state.readyState === WebSocketPeer.CLOSED) return;
   state.readyState = WebSocketPeer.CLOSED;
   state.pending = [];
   socketByAttachment.delete(state.attachmentId);
   emitSocketEvent(target, new WebSocketCloseEvent(code, reason, wasClean));
 };
 
-const emitSocketEvent = (target, event) => {
+const emitSocketEvent = (target, event, after = undefined) => {
   PromiseResolve().then(() => {
     const state = socket(target);
-    if (event.type === "message" && state.onmessage !== null) state.onmessage.call(target, event);
-    if (event.type === "close" && state.onclose !== null) state.onclose.call(target, event);
-    target.dispatchEvent(event);
+    try {
+      if (event.type === "message" && state.onmessage !== null) state.onmessage.call(target, event);
+      if (event.type === "close" && state.onclose !== null) state.onclose.call(target, event);
+      target.dispatchEvent(event);
+    } finally {
+      if (typeof after === "function") after();
+    }
   });
 };
 
@@ -320,6 +340,13 @@ globalThis.__perenDrainWebSocketOutbound = (instance) => {
   const outbound = state.outbound;
   state.outbound = [];
   return outbound;
+};
+
+globalThis.__perenReleaseWebSocket = (id, code = 1000, reason = "") => {
+  const peer = socketByAttachment.get(String(id));
+  if (peer === undefined) return false;
+  finishSocketClose(peer, code, String(reason), true);
+  return true;
 };
 
 class WebSocketPair {
