@@ -303,10 +303,13 @@ const finishSocketClose = (target, code, reason, wasClean) => {
 const emitSocketEvent = (target, event, after = undefined) => {
   PromiseResolve().then(() => {
     const state = socket(target);
-    if (event.type === "message" && state.onmessage !== null) state.onmessage.call(target, event);
-    if (event.type === "close" && state.onclose !== null) state.onclose.call(target, event);
-    target.dispatchEvent(event);
-    if (typeof after === "function") after();
+    try {
+      if (event.type === "message" && state.onmessage !== null) state.onmessage.call(target, event);
+      if (event.type === "close" && state.onclose !== null) state.onclose.call(target, event);
+      target.dispatchEvent(event);
+    } finally {
+      if (typeof after === "function") after();
+    }
   });
 };
 
