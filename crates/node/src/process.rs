@@ -52,7 +52,10 @@ pub(super) struct App {
     pub(super) admission: Admission,
     pub(super) socket: Option<SocketApp>,
     pub(super) dev_inspector: bool,
+    pub(super) control_replay: ControlReplay,
 }
+
+pub(super) type ControlReplay = Arc<StdMutex<BTreeMap<String, i64>>>;
 
 #[derive(Clone)]
 pub(super) struct SocketApp {
@@ -309,6 +312,7 @@ impl Process {
 
         let readiness = Arc::new(AtomicBool::new(false));
         let retired = Arc::new(AtomicBool::new(false));
+        let control_replay = Arc::new(StdMutex::new(BTreeMap::new()));
         let listeners_total =
             1 + control_config.sockets.len() + usize::from(control_config.console_listen.is_some());
         let services_total = control_config.raw.services.len();
@@ -338,6 +342,7 @@ impl Process {
                 admission: admission.clone(),
                 socket: None,
                 dev_inspector: options.dev_inspector,
+                control_replay: Arc::clone(&control_replay),
             },
         ));
         let socket_services = socket_services(&control_config.raw.sockets);
@@ -374,6 +379,7 @@ impl Process {
                     },
                     admission: admission.clone(),
                     dev_inspector: options.dev_inspector,
+                    control_replay: Arc::clone(&control_replay),
                     socket: Some(socket_app(
                         SocketContext {
                             node: context.node,
@@ -432,6 +438,7 @@ impl Process {
                     admission: admission.clone(),
                     socket: None,
                     dev_inspector: options.dev_inspector,
+                    control_replay: Arc::clone(&control_replay),
                 },
             ));
         }

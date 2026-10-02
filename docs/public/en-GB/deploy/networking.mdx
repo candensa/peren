@@ -19,6 +19,8 @@ Terminate public TLS at a reverse proxy or load balancer in front of the socket.
 
 `[node].listen` is the peer listen address. Control endpoints such as `POST /control/v1/node/drain` are served only on the peer listener. Keep that port off the public network with host firewall rules, security groups, or cluster network policy.
 
+Set `[control].require_signed_mutations = true` when operators or automation can send signed peer control requests. In that mode, mutating peer control endpoints require Peren control-signature headers and reject replayed nonces, stale timestamps, target-node mismatches, and body tampering. Read-only health, readiness, metrics, and node status checks remain unsigned.
+
 ## Certificate material in config
 
 ```toml

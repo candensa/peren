@@ -13,6 +13,7 @@ fn current_minimal_config_keeps_defaults() {
 
     assert_eq!(config.raw.bucket.kind, BucketKind::Memory);
     assert!(config.raw.mtls.require_client_cert);
+    assert!(!config.raw.control.require_signed_mutations);
     assert_eq!(config.raw.routing.ownership_cache_ttl_secs, 45);
     assert_eq!(config.raw.limits.request_body_bytes, 32 * 1024 * 1024);
     assert_eq!(config.services.len(), 1);
@@ -156,10 +157,11 @@ secret_name = "stored-node-id""#,
 #[test]
 fn optional_root_tables_keep_their_compatibility_defaults() {
     let source = format!(
-        "{MINIMAL}\n[deploy]\n\n[d1_time_travel]\n\n[workflow]\n\n[tracing]\n\n[containers]\n"
+        "{MINIMAL}\n[control]\n\n[deploy]\n\n[d1_time_travel]\n\n[workflow]\n\n[tracing]\n\n[containers]\n"
     );
     let config = FleetConfig::from_toml(&source).unwrap().validate().unwrap();
 
+    assert!(!config.raw.control.require_signed_mutations);
     assert!(config.raw.deploy.as_ref().unwrap().enable_preview);
     assert_eq!(config.raw.time_travel.retention_days, 30);
     assert_eq!(config.raw.workflow.wakeup_sweep_interval_secs, 15);
@@ -174,6 +176,14 @@ fn optional_root_tables_keep_their_compatibility_defaults() {
         32
     );
     assert_eq!(config.raw.limits.subrequests_per_invocation, 10_000);
+}
+
+#[test]
+fn control_mutation_signing_can_be_required_explicitly() {
+    let source = format!("{MINIMAL}\n[control]\nrequire_signed_mutations = true\n");
+    let config = FleetConfig::from_toml(&source).unwrap().validate().unwrap();
+
+    assert!(config.raw.control.require_signed_mutations);
 }
 
 #[test]

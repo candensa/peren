@@ -33,6 +33,8 @@ curl -sS -X POST http://127.0.0.1:7000/control/v1/node/drain
 
 That call sets readiness false and admission to draining on the running process. New top-level work on that node is refused with 503. The endpoint exists only on the peer listener.
 
+If `[control].require_signed_mutations = true`, the same request must include Peren control-signature headers. The signature targets the node id and covers the method, path, request body, timestamp, and nonce. Unsigned live drain requests return `401` in that mode.
+
 Response fields include `admission`, `ready`, `active`, `disk_removal_safe`, and `retired`. `disk_removal_safe` is true when the listener is not ready and active work is zero.
 
 The `peren` CLI drain command performs the registry write. It does not call the peer control endpoint.
