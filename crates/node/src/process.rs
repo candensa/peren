@@ -565,7 +565,7 @@ fn socket_app(context: SocketContext<'_>, bundle: WorkerBundle, service: &str) -
         bundle,
         service: Arc::from(service),
         service_scope: Arc::from(service_config.map_or_else(
-            || format!("service/{service}"),
+            || service.to_string(),
             peren_config::Service::isolation_scope,
         )),
         limits: context.limits,
@@ -822,7 +822,7 @@ fn service_targets(
             let scope = services
                 .iter()
                 .find(|service| service.name == *name)
-                .map_or_else(|| format!("service/{name}"), Service::isolation_scope);
+                .map_or_else(|| name.clone(), Service::isolation_scope);
             (
                 name.clone(),
                 ServiceTarget {

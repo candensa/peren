@@ -46,14 +46,14 @@ impl Registry {
     pub(super) fn insert(&mut self, mut generation: Generation) -> Generation {
         for existing in &mut self.generations {
             if !generation.preview
-                && existing.scope == generation.scope
+                && same_generation_scope(existing, &generation)
                 && existing.service == generation.service
             {
                 existing.active = false;
             }
         }
         if let Some(existing) = self.generations.iter_mut().find(|existing| {
-            existing.scope == generation.scope
+            same_generation_scope(existing, &generation)
                 && existing.service == generation.service
                 && existing.digest == generation.digest
         }) {
@@ -87,4 +87,17 @@ impl Registry {
                 .then_with(|| left.digest.cmp(&right.digest))
         });
     }
+}
+
+fn same_generation_scope(left: &Generation, right: &Generation) -> bool {
+    if left.scope == right.scope {
+        return true;
+    }
+    left.service == right.service
+        && left.tenant.is_none()
+        && left.project.is_none()
+        && right.tenant.is_none()
+        && right.project.is_none()
+        && ((left.scope.is_empty() && right.scope == right.service)
+            || (right.scope.is_empty() && left.scope == left.service))
 }

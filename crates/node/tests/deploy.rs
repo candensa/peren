@@ -70,6 +70,7 @@ fn deployment_lifecycle_records_lists_health_rolls_back_and_prunes() {
         .generations
         .remove(0);
     assert!(first.active);
+    assert_eq!(first.scope, "api");
 
     project.write_worker("export default { fetch() { return new Response('two') } };");
     deployment
@@ -155,6 +156,42 @@ fn deployment_record_is_idempotent_and_audit_stays_metadata_only() {
     assert!(!audit.contains("same"));
     assert!(!audit.contains("worker.js"));
     assert!(!audit.contains(&project.worker.display().to_string()));
+}
+
+#[test]
+fn deployment_record_reuses_legacy_unscoped_generation_scope() {
+    let project = Project::new("export default { fetch() { return new Response('legacy') } };");
+    let config = config(&project.worker);
+    let env = Env::new();
+    let deployment = Deployment::new(&config, &env);
+    let mut generation = deployment
+        .record(&DeployRecord {
+            percent: 100,
+            preview: false,
+        })
+        .unwrap()
+        .generations
+        .remove(0);
+
+    generation.scope.clear();
+    generation.active = true;
+    write_registry(&env, &[generation.clone()]);
+
+    let recorded = deployment
+        .record(&DeployRecord {
+            percent: 50,
+            preview: false,
+        })
+        .unwrap();
+    assert_eq!(recorded.generations.len(), 1);
+    assert_eq!(recorded.generations[0].scope, "api");
+    assert_eq!(recorded.generations[0].digest, generation.digest);
+    assert_eq!(recorded.generations[0].percent, 50);
+
+    let registry: serde_json::Value =
+        serde_json::from_slice(&fs::read(env.deploy_file()).unwrap()).unwrap();
+    assert_eq!(registry["generations"].as_array().unwrap().len(), 1);
+    assert_eq!(registry["generations"][0]["scope"], "api");
 }
 
 #[test]

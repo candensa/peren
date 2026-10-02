@@ -183,6 +183,9 @@ pub struct Service {
 impl Service {
     #[must_use]
     pub fn isolation_scope(&self) -> String {
+        if self.tenant_id.is_none() && self.project_id.is_none() {
+            return self.name.clone();
+        }
         let mut scope = String::new();
         if let Some(tenant) = self.tenant_id.as_deref() {
             scope.push_str("tenant/");

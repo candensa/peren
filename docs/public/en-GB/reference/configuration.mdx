@@ -646,7 +646,7 @@ Optional. Each project belongs to a declared tenant.
 | `projects[].id` | string | yes | none | unique id using ASCII letters, digits, `.`, `_`, or `-` | tenant validation; service isolation scope | duplicate or unsafe id fails validation |
 | `projects[].tenant_id` | string | yes | none | id in `[[tenants]]` | tenant validation | unknown tenant fails validation |
 
-A service that sets `project_id` must set `tenant_id` to that project's tenant. For a scoped service, Peren records and compares the service isolation scope as `tenant/<tenant_id>/project/<project_id>/service/<service>`. Services without tenant or project metadata use `service/<service>`.
+A service that sets `project_id` must set `tenant_id` to that project's tenant. For a scoped service, Peren records and compares the service isolation scope as `tenant/<tenant_id>/project/<project_id>/service/<service>`. Services without tenant or project metadata keep the service name as their scope, preserving existing unscoped runtime and deployment state.
 
 ## `[[dispatch_namespaces]]`
 
