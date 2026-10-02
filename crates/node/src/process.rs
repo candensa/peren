@@ -564,12 +564,10 @@ fn socket_app(context: SocketContext<'_>, bundle: WorkerBundle, service: &str) -
         node: Node::new(context.node, context.data.join("cells"), context.repository),
         bundle,
         service: Arc::from(service),
-        service_scope: Arc::from(
-            service_config.map_or_else(
-                || format!("service/{service}"),
-                peren_config::Service::isolation_scope,
-            ),
-        ),
+        service_scope: Arc::from(service_config.map_or_else(
+            || format!("service/{service}"),
+            peren_config::Service::isolation_scope,
+        )),
         limits: context.limits,
         checkpoint_threshold_bytes: context
             .checkpoint_thresholds
