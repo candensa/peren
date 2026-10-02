@@ -587,7 +587,7 @@ pub(crate) async fn dispatch_worker(
                 Ok(response) => Ok(response),
                 Err(error) => {
                     let _ = websocket_sessions.remove(&recorded.host_id);
-                    return Err(error);
+                    Err(error)
                 }
             }
         } else {
