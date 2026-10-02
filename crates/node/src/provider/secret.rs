@@ -147,13 +147,8 @@ fn environment_references(binding: &peren_config::Binding) -> Vec<&str> {
             secret_key_env,
             token_env,
             ..
-        } => access_key_env
-            .iter()
-            .chain(secret_key_env.iter())
-            .chain(token_env.iter())
-            .map(String::as_str)
-            .collect(),
-        peren_config::Binding::AwsSigv4 {
+        }
+        | peren_config::Binding::AwsSigv4 {
             credential_source:
                 peren_config::CredentialsSource::Configured
                 | peren_config::CredentialsSource::Environment,
@@ -167,7 +162,6 @@ fn environment_references(binding: &peren_config::Binding) -> Vec<&str> {
             .chain(token_env.iter())
             .map(String::as_str)
             .collect(),
-        peren_config::Binding::AwsSigv4 { .. } => Vec::new(),
         peren_config::Binding::Vectorize { provider, .. } => {
             vector_environment_references(provider)
         }
