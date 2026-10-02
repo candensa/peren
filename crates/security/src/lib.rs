@@ -17,7 +17,9 @@ const KEY: &str = "credential.key";
 const KEY_BYTES: usize = 32;
 const VERSION: &str = "peren-scoped-credential-v1";
 const NODE_VERSION: &str = "peren-node-identity-v1";
+const CONTROL_VERSION: &str = "peren-control-request-v1";
 const TOKEN_TTL_MS: i64 = 15 * 60 * 1_000;
+const CONTROL_CLOCK_SKEW_MS: i64 = 5 * 60 * 1_000;
 
 pub struct Devcert {
     pub directory: std::path::PathBuf,
@@ -186,6 +188,44 @@ pub fn verify_node(directory: &Path, token: &str) -> Result<NodeClaims, Credenti
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlRequest<'a> {
+    pub target_node: &'a str,
+    pub method: &'a str,
+    pub target: &'a str,
+    pub body: &'a [u8],
+    pub timestamp_ms: i64,
+    pub nonce: &'a str,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControlSignature {
+    pub version: &'static str,
+    pub signature: String,
+}
+
+pub fn sign_control_request(
+    directory: &Path,
+    request: &ControlRequest<'_>,
+) -> Result<ControlSignature, CredentialError> {
+    validate_control_request(request)?;
+    let key = load_or_create_key(directory)?;
+    Ok(ControlSignature {
+        version: CONTROL_VERSION,
+        signature: sign(&key, control_payload(request).as_bytes()),
+    })
+}
+
+pub fn verify_control_request(
+    directory: &Path,
+    request: &ControlRequest<'_>,
+    version: &str,
+    signature: &str,
+) -> Result<(), CredentialError> {
+    let key = load_key(directory)?;
+    verify_control_request_with_key(&key, request, version, signature, now_ms())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mint {
     pub tenant: String,
     pub bucket: String,
@@ -322,6 +362,62 @@ fn node_token(key: &[u8], request: NodeMint, now: i64) -> Result<String, Credent
     Ok(format!("{claims}.{signature}"))
 }
 
+fn verify_control_request_with_key(
+    key: &[u8],
+    request: &ControlRequest<'_>,
+    version: &str,
+    signature: &str,
+    now: Result<i64, CredentialError>,
+) -> Result<(), CredentialError> {
+    validate_control_request(request)?;
+    if version != CONTROL_VERSION {
+        return Err(CredentialError::Version(version.to_string()));
+    }
+    let now = now?;
+    if request.timestamp_ms > now.saturating_add(CONTROL_CLOCK_SKEW_MS)
+        || request.timestamp_ms < now.saturating_sub(CONTROL_CLOCK_SKEW_MS)
+    {
+        return Err(CredentialError::Expired);
+    }
+    let expected = sign(key, control_payload(request).as_bytes());
+    if expected != signature {
+        return Err(CredentialError::InvalidSignature);
+    }
+    Ok(())
+}
+
+fn validate_control_request(request: &ControlRequest<'_>) -> Result<(), CredentialError> {
+    if request.target_node.trim().is_empty()
+        || request.method.trim().is_empty()
+        || request.target.trim().is_empty()
+    {
+        return Err(CredentialError::ControlRequest);
+    }
+    if request.nonce.len() < 16
+        || request.nonce.len() > 128
+        || !request
+            .nonce
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(CredentialError::ControlNonce);
+    }
+    Ok(())
+}
+
+fn control_payload(request: &ControlRequest<'_>) -> String {
+    let body_hash = sign(b"peren-control-body-sha256", request.body);
+    format!(
+        "{CONTROL_VERSION}\n{}\n{}\n{}\n{}\n{}\n{}",
+        request.target_node,
+        request.method.to_ascii_uppercase(),
+        request.target,
+        request.timestamp_ms,
+        request.nonce,
+        body_hash
+    )
+}
+
 fn now_ms() -> Result<i64, CredentialError> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -446,6 +542,10 @@ pub enum CredentialError {
     Version(String),
     #[error("node identity token is missing cluster, node, or peer address")]
     NodeIdentity,
+    #[error("control request is missing node, method, or target")]
+    ControlRequest,
+    #[error("control request nonce is invalid")]
+    ControlNonce,
     #[error("credential token does not grant required scope {0:?}")]
     Permission(String),
     #[error("credential bucket prefix {actual:?} is outside allowed prefix {expected:?}")]
@@ -480,6 +580,71 @@ mod tests {
         assert_eq!(claims.cluster, "prod");
         assert_eq!(claims.peer_addr, "127.0.0.1:7000");
         assert!(verify_node(&directory, &format!("{token}x")).is_err());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn control_request_signature_binds_method_target_and_body() {
+        let directory =
+            std::env::temp_dir().join(format!("peren-control-sign-{}", uuid::Uuid::new_v4()));
+        let request = ControlRequest {
+            target_node: "00000000-0000-0000-0000-000000000001",
+            method: "POST",
+            target: "/control/v1/node/drain",
+            body: b"",
+            timestamp_ms: now_ms().unwrap(),
+            nonce: "nonce-0000000001",
+        };
+        let signed = sign_control_request(&directory, &request).unwrap();
+
+        verify_control_request(&directory, &request, signed.version, &signed.signature).unwrap();
+
+        let tampered = ControlRequest {
+            target: "/control/v1/node/retire",
+            ..request
+        };
+        assert!(matches!(
+            verify_control_request(&directory, &tampered, signed.version, &signed.signature),
+            Err(CredentialError::InvalidSignature)
+        ));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn control_request_rejects_stale_timestamps_and_bad_nonces() {
+        let directory =
+            std::env::temp_dir().join(format!("peren-control-sign-{}", uuid::Uuid::new_v4()));
+        let key = load_or_create_key(&directory).unwrap();
+        let stale = ControlRequest {
+            target_node: "00000000-0000-0000-0000-000000000001",
+            method: "POST",
+            target: "/control/v1/node/drain",
+            body: b"",
+            timestamp_ms: 1_000,
+            nonce: "nonce-0000000002",
+        };
+        let signature = sign(&key, control_payload(&stale).as_bytes());
+
+        assert!(matches!(
+            verify_control_request_with_key(
+                &key,
+                &stale,
+                CONTROL_VERSION,
+                &signature,
+                Ok(1_000 + CONTROL_CLOCK_SKEW_MS + 1)
+            ),
+            Err(CredentialError::Expired)
+        ));
+        assert!(matches!(
+            sign_control_request(
+                &directory,
+                &ControlRequest {
+                    nonce: "short",
+                    ..stale
+                }
+            ),
+            Err(CredentialError::ControlNonce)
+        ));
         std::fs::remove_dir_all(directory).unwrap();
     }
 

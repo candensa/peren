@@ -1,18 +1,23 @@
 #[cfg(test)]
 use std::collections::BTreeMap;
-use std::{path::PathBuf, sync::atomic::Ordering};
+use std::{
+    path::PathBuf,
+    sync::atomic::Ordering,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[cfg(test)]
 use axum::{
     Json,
     body::Body,
     extract::Path as AxumPath,
-    http::{HeaderMap, Method, Response, StatusCode, Uri},
+    http::{Method, Response, StatusCode},
 };
 use axum::{
     Json as AxumJson,
+    body::Bytes,
     extract::{Query, State},
-    http::{StatusCode as AxumStatusCode, header},
+    http::{HeaderMap, StatusCode as AxumStatusCode, Uri, header},
     response::IntoResponse,
 };
 #[cfg(test)]
@@ -408,11 +413,26 @@ impl Environment for ControlEnvironment {
 
 pub(super) async fn deployment_record(
     State(app): State<App>,
-    AxumJson(request): AxumJson<DeploymentRecordRequest>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
 ) -> impl IntoResponse {
     if !is_peer(&app) {
         return AxumStatusCode::NOT_FOUND.into_response();
     }
+    if let Err(response) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
+        return response;
+    }
+    let request = match serde_json::from_slice::<DeploymentRecordRequest>(&body) {
+        Ok(request) => request,
+        Err(error) => {
+            return (
+                AxumStatusCode::BAD_REQUEST,
+                AxumJson(serde_json::json!({ "error": error.to_string() })),
+            )
+                .into_response();
+        }
+    };
     if request.percent > 100 {
         return (
             AxumStatusCode::BAD_REQUEST,
@@ -518,9 +538,17 @@ pub(super) async fn node_status(State(app): State<App>) -> impl IntoResponse {
     }
 }
 
-pub(super) async fn node_drain(State(app): State<App>) -> impl IntoResponse {
+pub(super) async fn node_drain(
+    State(app): State<App>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> impl IntoResponse {
     if !is_peer(&app) {
         return AxumStatusCode::NOT_FOUND.into_response();
+    }
+    if let Err(response) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
+        return response;
     }
     app.readiness.store(false, Ordering::Release);
     app.admission.set_mode(AdmissionMode::Draining);
@@ -528,9 +556,17 @@ pub(super) async fn node_drain(State(app): State<App>) -> impl IntoResponse {
     (AxumStatusCode::OK, AxumJson(report)).into_response()
 }
 
-pub(super) async fn node_control_only(State(app): State<App>) -> impl IntoResponse {
+pub(super) async fn node_control_only(
+    State(app): State<App>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> impl IntoResponse {
     if !is_peer(&app) {
         return AxumStatusCode::NOT_FOUND.into_response();
+    }
+    if let Err(response) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
+        return response;
     }
     app.readiness.store(false, Ordering::Release);
     app.admission.set_mode(AdmissionMode::ControlOnly);
@@ -538,10 +574,18 @@ pub(super) async fn node_control_only(State(app): State<App>) -> impl IntoRespon
     (AxumStatusCode::OK, AxumJson(report)).into_response()
 }
 
-pub(super) async fn node_retire(State(app): State<App>) -> impl IntoResponse {
+pub(super) async fn node_retire(
+    State(app): State<App>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Bytes,
+) -> impl IntoResponse {
     let Some(report) = peer_report(&app) else {
         return AxumStatusCode::NOT_FOUND.into_response();
     };
+    if let Err(response) = authorize_control_mutation(&app, &headers, "POST", &uri, &body) {
+        return response;
+    }
     if !report.disk_removal_safe {
         return (AxumStatusCode::CONFLICT, AxumJson(report)).into_response();
     }
@@ -571,6 +615,100 @@ fn peer_report(app: &App) -> Option<NodeControlReport> {
 
 fn is_peer(app: &App) -> bool {
     app.metrics.listener.as_ref() == "peer"
+}
+
+fn authorize_control_mutation(
+    app: &App,
+    headers: &HeaderMap,
+    method: &str,
+    uri: &Uri,
+    body: &[u8],
+) -> Result<(), axum::response::Response> {
+    if !app.config.raw.control.require_signed_mutations {
+        return Ok(());
+    }
+    let target_node = required_header(headers, "x-peren-target-node")?;
+    if target_node != app.node.as_uuid().to_string() {
+        return Err(control_auth_error(
+            "target node does not match this listener",
+        ));
+    }
+    let timestamp_ms = required_header(headers, "x-peren-request-timestamp-ms")?
+        .parse::<i64>()
+        .map_err(|_| control_auth_error("timestamp is invalid"))?;
+    let nonce = required_header(headers, "x-peren-nonce")?;
+    let version = required_header(headers, "x-peren-signature-version")?;
+    let signature = required_header(headers, "x-peren-signature")?;
+    let target = uri.path_and_query().map_or_else(
+        || uri.path().to_string(),
+        |value| value.as_str().to_string(),
+    );
+    peren_security::verify_control_request(
+        &control_key_dir(app),
+        &peren_security::ControlRequest {
+            target_node: &target_node,
+            method,
+            target: &target,
+            body,
+            timestamp_ms,
+            nonce: &nonce,
+        },
+        &version,
+        &signature,
+    )
+    .map_err(|_| control_auth_error("control request signature is invalid"))?;
+    remember_control_nonce(app, &target_node, &nonce, timestamp_ms)
+}
+
+fn required_header(
+    headers: &HeaderMap,
+    name: &'static str,
+) -> Result<String, axum::response::Response> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| control_auth_error("control request signature is required"))
+}
+
+fn remember_control_nonce(
+    app: &App,
+    node: &str,
+    nonce: &str,
+    timestamp_ms: i64,
+) -> Result<(), axum::response::Response> {
+    let now = now_ms().map_err(|_| control_auth_error("system clock is invalid"))?;
+    let mut seen = app
+        .control_replay
+        .lock()
+        .map_err(|_| control_auth_error("control replay state is unavailable"))?;
+    let floor = now.saturating_sub(5 * 60 * 1_000);
+    seen.retain(|_, seen_at| *seen_at >= floor);
+    let key = format!("{node}:{nonce}");
+    if seen.insert(key, timestamp_ms).is_some() {
+        return Err(control_auth_error("control request nonce was already used"));
+    }
+    Ok(())
+}
+
+fn control_key_dir(app: &App) -> PathBuf {
+    app.data.join("credentials")
+}
+
+fn control_auth_error(message: &str) -> axum::response::Response {
+    (
+        AxumStatusCode::UNAUTHORIZED,
+        AxumJson(serde_json::json!({ "error": message })),
+    )
+        .into_response()
+}
+
+fn now_ms() -> Result<i64, ()> {
+    let duration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| ())?;
+    i64::try_from(duration.as_millis()).map_err(|_| ())
 }
 
 fn admission_name(mode: AdmissionMode) -> &'static str {

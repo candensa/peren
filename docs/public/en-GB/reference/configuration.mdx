@@ -107,6 +107,23 @@ leaf_key_path = "./certs/leaf-key.pem"
 
 `peren devcert ./certs` writes `ca.pem`, `leaf-cert.pem`, and `leaf-key.pem`. `peren init` writes `leaf.pem` and `leaf.key` into `[mtls]`. After `peren devcert`, edit those two paths so they name the files on disk. Use this command only for local development.
 
+## `[control]`
+
+Optional table. Controls peer-listener mutation checks. Restart required to change.
+
+| Path | Type | Required | Default | Valid values | Subsystem | Wrong value |
+| --- | --- | --- | --- | --- | --- | --- |
+| `control.require_signed_mutations` | bool | no | `false` | `true`, `false` | peer control mutations | type errors fail parse |
+
+When `require_signed_mutations = true`, peer control mutation requests must include Peren control-signature headers. The signature covers the target node id, method, path and query, body bytes, timestamp, and nonce. The node rejects missing signatures, mismatched target-node headers, stale timestamps, body tampering, and nonce replay within the timestamp window.
+
+```toml
+[control]
+require_signed_mutations = true
+```
+
+The signing key is the node data directory's credential key under `credentials/credential.key`. Existing fleet files keep unsigned peer mutations unless this setting is enabled.
+
 ## `[routing]`
 
 Optional table. Defaults apply when omitted.

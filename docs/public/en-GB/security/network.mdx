@@ -49,11 +49,13 @@ There is no ambient network from the isolate. Undeclared hosts do not leave the 
 
 **What Peren does:** `[mtls]` certificate paths are required in the fleet file. Public sockets and the peer listener accept plain TCP. The process does not terminate inbound TLS with the `[mtls]` material.
 
+Peer control mutations can require request signing when `[control].require_signed_mutations = true`. The signature is an HMAC over the target node id, method, path and query, body bytes, timestamp, and nonce using the node data directory's credential key. The node keeps replay state in memory for the accepted timestamp window and rejects reused nonces for the same target node.
+
 Outbound Worker client certificates are a separate `mtls_certificate` binding. They are not peer inbound TLS.
 
-**What you configure:** keeping the peer port off the public network with host firewall rules, security groups, or cluster network policy. Terminate public TLS at a reverse proxy or load balancer in front of public sockets.
+**What you configure:** keeping the peer port off the public network with host firewall rules, security groups, or cluster network policy. Terminate public TLS at a reverse proxy or load balancer in front of public sockets. Enable signed peer mutations only after the operators or automation that call those endpoints can send the control-signature headers.
 
-**What you can check:** peer and public listeners accept plain TCP. Certificate paths in `[mtls]` do not make those listeners speak TLS. See [Networking and ports](/docs/deploy/networking/).
+**What you can check:** peer and public listeners accept plain TCP. Certificate paths in `[mtls]` do not make those listeners speak TLS. With signed mutations enabled, an unsigned `POST /control/v1/node/drain` on the peer listener returns `401`. See [Networking and ports](/docs/deploy/networking/).
 
 ## Related
 

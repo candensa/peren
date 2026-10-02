@@ -31,6 +31,8 @@ pub struct FleetConfig {
     #[serde(default)]
     pub console: Option<Console>,
     #[serde(default)]
+    pub control: Control,
+    #[serde(default)]
     pub deploy: Option<Deploy>,
     #[serde(default)]
     pub peer_identity_token_ttl_secs: Option<u64>,
@@ -62,6 +64,12 @@ pub struct FleetConfig {
     pub services: Vec<Service>,
     #[serde(default)]
     pub sockets: Vec<Socket>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+pub struct Control {
+    #[serde(default)]
+    pub require_signed_mutations: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

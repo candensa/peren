@@ -17,6 +17,18 @@ POST /control/v1/node/drain
 
 You keep the peer port off the public network.
 
+When `[control].require_signed_mutations = true`, mutation requests on the peer listener must include Peren control-signature headers:
+
+| Header | Meaning |
+| --- | --- |
+| `x-peren-target-node` | UUID of the node that should apply the mutation. |
+| `x-peren-request-timestamp-ms` | Unix timestamp in milliseconds. |
+| `x-peren-nonce` | Unique nonce for this target node and timestamp window. |
+| `x-peren-signature-version` | Signature format version. |
+| `x-peren-signature` | HMAC over target node, method, path and query, body, timestamp, and nonce. |
+
+The node rejects missing signatures, stale timestamps, body tampering, and nonce replay. Existing fleet files keep unsigned mutations unless `require_signed_mutations` is enabled.
+
 ## Public sockets
 
 Each `[[sockets]]` entry has its own `listen` address and targets a named service. Application traffic reaches Workers through that address.
