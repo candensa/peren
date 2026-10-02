@@ -24,8 +24,8 @@ fn deploy_health(config: std::path::PathBuf, service: Option<String>) -> Result<
     let report = deployment.health(&peren_node::DeployHealth { service })?;
     for service in report.services {
         println!(
-            "{} {} healthy percent={}",
-            service.service, service.digest, service.percent
+            "{} {} healthy percent={} scope={}",
+            service.service, service.digest, service.percent, service.scope
         );
     }
     Ok(())
@@ -37,7 +37,7 @@ fn deploy_list(config: std::path::PathBuf, service: Option<String>) -> Result<()
     let report = deployment.list(&peren_node::DeployList { service })?;
     for generation in report.generations {
         println!(
-            "{} {} active={} preview={} percent={} entry={} modules={} maps={}",
+            "{} {} active={} preview={} percent={} entry={} modules={} maps={} scope={}",
             generation.service,
             generation.digest,
             generation.active,
@@ -45,7 +45,8 @@ fn deploy_list(config: std::path::PathBuf, service: Option<String>) -> Result<()
             generation.percent,
             generation.entry,
             generation.modules,
-            generation.source_maps
+            generation.source_maps,
+            generation.scope
         );
     }
     Ok(())
@@ -57,11 +58,12 @@ fn deploy_verify(config: std::path::PathBuf, service: Option<String>) -> Result<
     let report = deployment.verify(&peren_node::DeployVerify { service })?;
     for item in report.generations {
         println!(
-            "{} {} verified active={} percent={}",
+            "{} {} verified active={} percent={} scope={}",
             item.generation.service,
             item.generation.digest,
             item.generation.active,
-            item.generation.percent
+            item.generation.percent,
+            item.generation.scope
         );
     }
     Ok(())
@@ -104,12 +106,13 @@ fn deploy_record(command: cli::Deploy) -> Result<(), CliError> {
     })?;
     for generation in report.generations {
         println!(
-            "deployed {} {} preview={} percent={} maps={}",
+            "deployed {} {} preview={} percent={} maps={} scope={}",
             generation.service,
             generation.digest,
             generation.preview,
             generation.percent,
-            generation.source_maps
+            generation.source_maps,
+            generation.scope
         );
     }
     Ok(())

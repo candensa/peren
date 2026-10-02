@@ -1083,9 +1083,20 @@ async fn test_storage_inner(
     action: TestStorage,
 ) -> Result<JsonValue, ProcessError> {
     register_object(&socket.registry, &namespace, &id);
+    let class = test_object_class(&socket.environment, &namespace)
+        .ok_or(ProcessError::DurableObjectNamespace(namespace.clone()))?;
+    let service = socket
+        .objects
+        .get(&class)
+        .ok_or_else(|| ProcessError::DurableObjectClass(class.clone()))?;
+    let target = socket
+        .services
+        .get(service)
+        .ok_or_else(|| ProcessError::ServiceBundle(service.clone()))?;
+    let cell = process::object_cell(&target.scope, &namespace, &id);
     socket
         .node
-        .restore_and_dispatch(process::object_cell(&namespace, &id), |input| async move {
+        .restore_and_dispatch(cell, |input| async move {
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
@@ -1182,7 +1193,7 @@ async fn test_dispatch_alarm(
             socket
                 .node
                 .dispatch_alarm(
-                    process::object_cell(&namespace, &id),
+                    process::object_cell(&target.scope, &namespace, &id),
                     target.bundle.clone(),
                     IsolateLimits::new(socket.limits.heap, socket.limits.execution),
                 )

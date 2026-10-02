@@ -169,6 +169,35 @@ fn validation_accumulates_queue_tenant_and_telemetry_errors() {
 }
 
 #[test]
+fn tenant_and_project_scope_ids_are_path_safe() {
+    let source = MINIMAL.replace(
+        "[bucket]",
+        r#"[[tenants]]
+id = "acme/prod"
+cell_quota = 0
+
+[[projects]]
+id = "web/app"
+tenant_id = "acme/prod"
+
+[bucket]"#,
+    );
+    let error = FleetConfig::from_toml(&source)
+        .unwrap()
+        .validate()
+        .unwrap_err();
+    let fields: Vec<_> = error
+        .problems()
+        .iter()
+        .map(|problem| problem.field.as_str())
+        .collect();
+
+    assert!(fields.contains(&"tenants[0].id"));
+    assert!(fields.contains(&"tenants[0].cell_quota"));
+    assert!(fields.contains(&"projects[0].id"));
+}
+
+#[test]
 fn listener_addresses_are_parsed_before_construction() {
     let source = MINIMAL.replace("127.0.0.1:7500", "localhost:7500");
     let error = FleetConfig::from_toml(&source)

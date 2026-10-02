@@ -180,6 +180,26 @@ pub struct Service {
     pub placement_regions: Vec<String>,
 }
 
+impl Service {
+    #[must_use]
+    pub fn isolation_scope(&self) -> String {
+        let mut scope = String::new();
+        if let Some(tenant) = self.tenant_id.as_deref() {
+            scope.push_str("tenant/");
+            scope.push_str(tenant);
+            scope.push('/');
+        }
+        if let Some(project) = self.project_id.as_deref() {
+            scope.push_str("project/");
+            scope.push_str(project);
+            scope.push('/');
+        }
+        scope.push_str("service/");
+        scope.push_str(&self.name);
+        scope
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Entrypoint {

@@ -45,12 +45,17 @@ impl Registry {
 
     pub(super) fn insert(&mut self, mut generation: Generation) -> Generation {
         for existing in &mut self.generations {
-            if !generation.preview && existing.service == generation.service {
+            if !generation.preview
+                && existing.scope == generation.scope
+                && existing.service == generation.service
+            {
                 existing.active = false;
             }
         }
         if let Some(existing) = self.generations.iter_mut().find(|existing| {
-            existing.service == generation.service && existing.digest == generation.digest
+            existing.scope == generation.scope
+                && existing.service == generation.service
+                && existing.digest == generation.digest
         }) {
             generation.created_at_ms = existing.created_at_ms;
             *existing = generation.clone();
@@ -67,6 +72,7 @@ impl Registry {
             left.created_at_ms
                 .cmp(&right.created_at_ms)
                 .then_with(|| left.action.cmp(&right.action))
+                .then_with(|| left.scope.cmp(&right.scope))
                 .then_with(|| left.service.cmp(&right.service))
                 .then_with(|| left.digest.cmp(&right.digest))
         });
@@ -74,8 +80,9 @@ impl Registry {
 
     pub(super) fn sort(&mut self) {
         self.generations.sort_by(|left, right| {
-            left.service
-                .cmp(&right.service)
+            left.scope
+                .cmp(&right.scope)
+                .then_with(|| left.service.cmp(&right.service))
                 .then_with(|| right.created_at_ms.cmp(&left.created_at_ms))
                 .then_with(|| left.digest.cmp(&right.digest))
         });

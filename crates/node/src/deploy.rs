@@ -71,6 +71,7 @@ pub struct HealthReport {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct HealthyService {
     pub service: String,
+    pub scope: String,
     pub digest: String,
     pub percent: u8,
 }
@@ -95,6 +96,12 @@ pub struct RollbackReport {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Generation {
     pub service: String,
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default)]
+    pub tenant: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
     pub digest: String,
     pub entry: String,
     pub modules: usize,
@@ -119,6 +126,8 @@ pub struct Generation {
 pub struct AuditEvent {
     pub action: String,
     pub service: String,
+    #[serde(default)]
+    pub scope: String,
     #[serde(default)]
     pub digest: Option<String>,
     pub created_at_ms: i64,
@@ -178,12 +187,16 @@ pub fn record(
     let mut registry = Registry::load(root(environment))?;
     let mut generations = Vec::new();
     for service in &config.raw.services {
+        let scope = service.isolation_scope();
         let bundle = crate::bundle::load(service)?;
         let maps = source_maps(service)?;
         let digest = bundle.digest().to_string();
         let descriptor_digest = descriptor_digest(service, &bundle, &maps);
         let generation = Generation {
             service: service.name.clone(),
+            scope: scope.clone(),
+            tenant: service.tenant_id.clone(),
+            project: service.project_id.clone(),
             digest,
             entry: bundle.entry().to_string(),
             modules: bundle.modules().len(),
@@ -206,6 +219,7 @@ pub fn record(
             }
             .into(),
             service: generation.service.clone(),
+            scope: generation.scope.clone(),
             digest: Some(generation.digest.clone()),
             created_at_ms: now_ms()?,
         });
@@ -231,6 +245,11 @@ pub fn list(
                     .service
                     .as_ref()
                     .is_none_or(|service| generation.service == *service)
+                    && config
+                        .raw
+                        .services
+                        .iter()
+                        .any(|service| same_scope(generation, service))
             })
             .collect(),
     })
@@ -258,7 +277,7 @@ pub fn verify(
         for generation in registry
             .generations
             .iter()
-            .filter(|generation| generation.service == service.name && generation.active)
+            .filter(|generation| same_scope(generation, service) && generation.active)
         {
             if generation.digest != current {
                 return Err(DeployError::Drift {
@@ -305,7 +324,7 @@ pub fn health(
         let active = registry
             .generations
             .iter()
-            .filter(|generation| generation.service == service.name && generation.active)
+            .filter(|generation| same_scope(generation, service) && generation.active)
             .collect::<Vec<_>>();
         match active.as_slice() {
             [] => return Err(DeployError::NoActive(service.name.clone())),
@@ -333,6 +352,7 @@ pub fn health(
                 verify_descriptor(service, &bundle, &maps, generation)?;
                 services.push(HealthyService {
                     service: service.name.clone(),
+                    scope: service.isolation_scope(),
                     digest: generation.digest.clone(),
                     percent: generation.percent,
                 });
@@ -350,12 +370,18 @@ pub fn rollback(
 ) -> Result<RollbackReport, DeployError> {
     ensure_service(config, Some(&request.service))?;
     let mut registry = Registry::load(root(environment))?;
+    let service = config
+        .raw
+        .services
+        .iter()
+        .find(|service| service.name == request.service)
+        .ok_or_else(|| DeployError::Service(request.service.clone()))?;
     let digest = match &request.digest {
         Some(digest) => digest.clone(),
         None => registry
             .generations
             .iter()
-            .filter(|generation| generation.service == request.service && !generation.active)
+            .filter(|generation| same_scope(generation, service) && !generation.active)
             .max_by(|left, right| {
                 left.created_at_ms
                     .cmp(&right.created_at_ms)
@@ -366,7 +392,7 @@ pub fn rollback(
     };
     let mut selected = None;
     for generation in &mut registry.generations {
-        if generation.service == request.service {
+        if same_scope(generation, service) {
             generation.active = generation.digest == digest;
             if generation.active {
                 selected = Some(generation.clone());
@@ -377,12 +403,6 @@ pub fn rollback(
         service: request.service.clone(),
         digest,
     })?;
-    let service = config
-        .raw
-        .services
-        .iter()
-        .find(|service| service.name == request.service)
-        .ok_or_else(|| DeployError::Service(request.service.clone()))?;
     let bundle = crate::bundle::load(service)?;
     let current = bundle.digest().to_string();
     if generation.digest != current {
@@ -404,6 +424,7 @@ pub fn rollback(
     registry.audit(AuditEvent {
         action: "rollback".into(),
         service: request.service.clone(),
+        scope: service.isolation_scope(),
         digest: Some(generation.digest.clone()),
         created_at_ms: now_ms()?,
     });
@@ -418,10 +439,16 @@ pub fn prune(
 ) -> Result<PruneReport, DeployError> {
     ensure_service(config, Some(&request.service))?;
     let mut registry = Registry::load(root(environment))?;
+    let service_config = config
+        .raw
+        .services
+        .iter()
+        .find(|service| service.name == request.service)
+        .ok_or_else(|| DeployError::Service(request.service.clone()))?;
     let mut service = registry
         .generations
         .iter()
-        .filter(|generation| generation.service == request.service)
+        .filter(|generation| same_scope(generation, service_config))
         .cloned()
         .collect::<Vec<_>>();
     service.sort_by(|left, right| {
@@ -438,13 +465,16 @@ pub fn prune(
     if !request.dry && !removed.is_empty() {
         registry.generations.retain(|generation| {
             !removed.iter().any(|removed| {
-                removed.service == generation.service && removed.digest == generation.digest
+                removed.scope == generation.scope
+                    && removed.service == generation.service
+                    && removed.digest == generation.digest
             })
         });
         for generation in &removed {
             registry.audit(AuditEvent {
                 action: "prune".into(),
                 service: generation.service.clone(),
+                scope: generation.scope.clone(),
                 digest: Some(generation.digest.clone()),
                 created_at_ms: now_ms()?,
             });
@@ -464,6 +494,18 @@ fn ensure_service(config: &ValidatedConfig, service: Option<&str>) -> Result<(),
         return Err(DeployError::Service(service.to_string()));
     }
     Ok(())
+}
+
+fn same_scope(generation: &Generation, service: &peren_config::Service) -> bool {
+    if generation.scope.is_empty() {
+        generation.service == service.name
+            && generation.tenant.is_none()
+            && generation.project.is_none()
+            && service.tenant_id.is_none()
+            && service.project_id.is_none()
+    } else {
+        generation.scope == service.isolation_scope()
+    }
 }
 
 fn root(environment: &impl Environment) -> PathBuf {

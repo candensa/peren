@@ -9,7 +9,7 @@ A tenant is a customer or team named in the fleet file. Revoke and delete write 
 
 **What it covers:** the declared tenant identity and the registry that records revoke and delete actions.
 
-**What Peren does:** each `[[tenants]]` entry must declare a unique `id` and a `cell_quota`. Projects and other config that name a `tenant_id` must reference a declared tenant. `peren tenant revoke` and `peren tenant delete` accept only tenants declared in that config.
+**What Peren does:** each `[[tenants]]` entry must declare a unique `id` and a `cell_quota`. Tenant and project ids are path-safe tokens: ASCII letters, digits, `.`, `_`, and `-`. Projects and other config that name a `tenant_id` must reference a declared tenant. `peren tenant revoke` and `peren tenant delete` accept only tenants declared in that config.
 
 ```toml
 [[tenants]]
@@ -19,9 +19,11 @@ cell_quota = 10
 
 The registry file is `tenants/tenants.json` under `PEREN_DATA_DIR`, or under `./data` when that variable is unset. It stores revocations, deletions, and an audit list.
 
+Services that declare `tenant_id` and `project_id` get a service isolation scope of `tenant/<tenant_id>/project/<project_id>/service/<service>`. Peren uses that scope when it derives runtime cell ids and when it records or matches deployment generations. Services without tenant or project metadata use `service/<service>`.
+
 **What you configure:** which tenant ids appear in the fleet file, who may run revoke or delete, and what operational action follows a registry write.
 
-**What you can check:** config validation rejects unknown or duplicate tenant ids; revoke and delete refuse tenants that are not declared.
+**What you can check:** config validation rejects unknown, duplicate, or unsafe tenant ids; revoke and delete refuse tenants that are not declared.
 
 ## Revoke and delete write the registry
 

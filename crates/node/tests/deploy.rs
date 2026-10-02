@@ -158,6 +158,50 @@ fn deployment_record_is_idempotent_and_audit_stays_metadata_only() {
 }
 
 #[test]
+fn deployment_registry_matches_generations_by_isolation_scope() {
+    let project = Project::new("export default { fetch() { return new Response('scoped') } };");
+    let config = scoped_config(&project.worker);
+    let env = Env::new();
+    let deployment = Deployment::new(&config, &env);
+
+    let recorded = deployment
+        .record(&DeployRecord {
+            percent: 100,
+            preview: false,
+        })
+        .unwrap()
+        .generations
+        .remove(0);
+    assert_eq!(recorded.service, "api");
+    assert_eq!(recorded.scope, "tenant/acme/project/web/service/api");
+    assert_eq!(recorded.tenant.as_deref(), Some("acme"));
+    assert_eq!(recorded.project.as_deref(), Some("web"));
+
+    let mut foreign = recorded.clone();
+    foreign.scope = "tenant/other/project/web/service/api".into();
+    foreign.tenant = Some("other".into());
+    foreign.active = true;
+    write_registry(&env, &[recorded.clone(), foreign]);
+
+    let listed = deployment
+        .list(&DeployList {
+            service: Some("api".into()),
+        })
+        .unwrap();
+    assert_eq!(listed.generations, vec![recorded.clone()]);
+    assert_eq!(
+        deployment
+            .health(&DeployHealth {
+                service: Some("api".into())
+            })
+            .unwrap()
+            .services[0]
+            .scope,
+        "tenant/acme/project/web/service/api"
+    );
+}
+
+#[test]
 fn deployment_verify_rejects_descriptor_drift_and_legacy_records() {
     let project = Project::new("export default { fetch() { return new Response('stable') } };");
     let original = config(&project.worker);
@@ -291,6 +335,46 @@ leaf_key_path = "key.pem"
 name = "api"
 worker_bundle_path = "{}"
 compatibility_date = "2024-01-01"
+"#,
+        Uuid::new_v4(),
+        bundle.display()
+    );
+    toml::from_str::<FleetConfig>(&text)
+        .unwrap()
+        .validate()
+        .unwrap()
+}
+
+fn scoped_config(bundle: &Path) -> ValidatedConfig {
+    let text = format!(
+        r#"
+[node]
+node_id = "{}"
+advertise_addr = "127.0.0.1:0"
+listen = "127.0.0.1:0"
+
+[bucket]
+kind = "memory"
+
+[mtls]
+ca_cert_path = "ca.pem"
+leaf_cert_path = "leaf.pem"
+leaf_key_path = "key.pem"
+
+[[tenants]]
+id = "acme"
+cell_quota = 10
+
+[[projects]]
+id = "web"
+tenant_id = "acme"
+
+[[services]]
+name = "api"
+worker_bundle_path = "{}"
+compatibility_date = "2024-01-01"
+tenant_id = "acme"
+project_id = "web"
 "#,
         Uuid::new_v4(),
         bundle.display()
