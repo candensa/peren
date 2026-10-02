@@ -106,6 +106,7 @@ pub const CAPABILITIES: &[RuntimeCapability] = &[
     global::SETIMMEDIATE,
     global::SETINTERVAL,
     global::SETTIMEOUT,
+    global::SELF,
     global::STRUCTUREDCLONE,
     event::ALARM,
     event::FETCH,

@@ -171,6 +171,203 @@ async fn loader_binding_imports_only_bundled_relative_modules() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn loader_binding_resolves_entrypoints_and_durable_object_classes() {
+    let entry = ModuleName::parse("src/main.js").unwrap();
+    let bundle = WorkerBundle::new(
+        entry.clone(),
+        BTreeMap::from([
+            (
+                entry,
+                Module::new(
+                    ModuleKind::JavaScript,
+                    br"export default { async fetch(_request, env) {
+                        const worker = await env.LOADER.get('../lib/worker.js');
+                        const entrypoint = worker.getEntrypoint();
+                        const named = worker.getEntrypoint('named');
+                        const Counter = worker.getDurableObjectClass('Counter');
+                        const DirectCounter = await env.LOADER.getDurableObjectClass('Counter', '../lib/worker.js');
+                        const directEntrypoint = await env.LOADER.getEntrypoint('../lib/worker.js');
+                        const state = new DurableObjectState();
+                        const counter = state.facets.get('counter', () => Counter);
+                        const direct = state.facets.get('direct', () => DirectCounter);
+                        const loaded = await entrypoint.fetch();
+                        const directLoaded = await directEntrypoint.fetch();
+                        const counted = await counter.increment();
+                        const directCounted = await direct.increment();
+                        return Response.json({
+                          loaded: await loaded.text(),
+                          directLoaded: await directLoaded.text(),
+                          named: named.label,
+                          counted,
+                          directCounted,
+                        });
+                    } };".as_slice(),
+                )
+                .unwrap(),
+            ),
+            (
+                ModuleName::parse("lib/worker.js").unwrap(),
+                Module::new(
+                    ModuleKind::JavaScript,
+                    br"export class Counter {
+                        constructor(ctx) { this.ctx = ctx; }
+                        async increment() {
+                          const current = await this.ctx.storage.get('count');
+                          const next = current === undefined ? 1 : current[0] + 1;
+                          await this.ctx.storage.put('count', new Uint8Array([next]));
+                          return next;
+                        }
+                      }
+                      export const named = { label: 'named-entrypoint' };
+                      export default { fetch() { return new Response('loaded-entrypoint'); } };".as_slice(),
+                )
+                .unwrap(),
+            ),
+        ]),
+    )
+    .unwrap();
+    let mut environment = BTreeMap::new();
+    environment.insert(
+        "__perenBindings".to_string(),
+        r#"{"LOADER":{"type":"loader"}}"#.to_string(),
+    );
+    let mut runtime = WorkerRuntime::load_with_capabilities(
+        bundle,
+        limits(),
+        WorkerEnvironment::new(environment),
+        Capabilities {
+            storage: Arc::new(SqlHost::new()),
+            fetch: None,
+            queue: None,
+            r2: None,
+            service: None,
+            durable: None,
+            cache: None,
+            kv: None,
+            ai: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.invalid/loader".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({
+            "loaded": "loaded-entrypoint",
+            "directLoaded": "loaded-entrypoint",
+            "named": "named-entrypoint",
+            "counted": 1,
+            "directCounted": 1,
+        })
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn loader_binding_reports_missing_or_invalid_exports() {
+    let entry = ModuleName::parse("src/main.js").unwrap();
+    let bundle = WorkerBundle::new(
+        entry.clone(),
+        BTreeMap::from([
+            (
+                entry,
+                Module::new(
+                    ModuleKind::JavaScript,
+                    br"export default { async fetch(_request, env) {
+                        const worker = await env.LOADER.get('../lib/worker.js');
+                        const failures = [];
+                        for (const run of [
+                          () => worker.getEntrypoint('missing'),
+                          () => worker.getDurableObjectClass('missing'),
+                          () => worker.getDurableObjectClass('NotClass'),
+                          () => worker.getDurableObjectClass('ArrowCounter'),
+                        ]) {
+                          try { run(); failures.push(false); }
+                          catch (error) { failures.push(error instanceof TypeError); }
+                        }
+                        const lookupRejections = [];
+                        for (const run of [
+                          () => env.LOADER.get('lib/worker.js'),
+                          () => env.LOADER.getEntrypoint('lib/worker.js'),
+                          () => env.LOADER.getDurableObjectClass('ArrowCounter', 'lib/worker.js'),
+                        ]) {
+                          try { await run(); lookupRejections.push(false); }
+                          catch (error) { lookupRejections.push(error instanceof TypeError); }
+                        }
+                        const imported = await env.LOADER.import('lib/worker.js');
+                        return Response.json({ failures, lookupRejections, imported: imported.value });
+                    } };"
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            (
+                ModuleName::parse("lib/worker.js").unwrap(),
+                Module::new(
+                    ModuleKind::JavaScript,
+                    b"export const NotClass = { value: 1 }; export const ArrowCounter = () => {}; export const value = 7; export default {};".as_slice(),
+                )
+                .unwrap(),
+            ),
+            (
+                ModuleName::parse("src/lib/worker.js").unwrap(),
+                Module::new(ModuleKind::JavaScript, b"export const value = 9;".as_slice()).unwrap(),
+            ),
+        ]),
+    )
+    .unwrap();
+    let mut environment = BTreeMap::new();
+    environment.insert(
+        "__perenBindings".to_string(),
+        r#"{"LOADER":{"type":"loader"}}"#.to_string(),
+    );
+    let mut runtime = WorkerRuntime::load_with_environment(
+        bundle,
+        limits(),
+        WorkerEnvironment::new(environment),
+        Arc::new(Host::default()),
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.invalid/loader-errors".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({
+            "failures": [true, true, true, true],
+            "lookupRejections": [true, true, true],
+            "imported": 9,
+        })
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn javascript_wasm_example_executes_with_runtime_loader() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")

@@ -99,18 +99,63 @@ function containerBinding(binding) {
 }
 
 const loaderBinding = () => ObjectFreeze(Object.assign(ObjectCreate(Loader.prototype), {
+  async get(specifier = undefined) {
+    const module = await loaderImport(specifier, true);
+    return ObjectFreeze({
+      getEntrypoint(exportName = "default") {
+        return loaderExport(module, exportName, "entrypoint");
+      },
+      getDurableObjectClass(className) {
+        return loaderClass(module, className);
+      },
+    });
+  },
+  async getEntrypoint(specifier = undefined, exportName = "default") {
+    const module = await loaderImport(specifier, true);
+    return loaderExport(module, exportName, "entrypoint");
+  },
+  async getDurableObjectClass(className, specifier = undefined) {
+    const module = await loaderImport(specifier, true);
+    return loaderClass(module, className);
+  },
   async import(specifier) {
-    const value = String(specifier);
-    if (value.length === 0) throw new TypeError("module specifier cannot be empty");
-    if (/^(?:https?:|node:|npm:|jsr:)/.test(value)) {
-      throw new TypeError(`unsupported dynamic module specifier ${value}`);
-    }
-    const base = globalThis.__perenEntryModuleSpecifier;
-    if (typeof base !== "string" || base.length === 0) {
-      throw new TypeError("Worker entry module is unavailable for dynamic import");
-    }
-    return await import(new URL(value, base).href);
+    return await loaderImport(specifier);
   },
 }));
 
+const loaderSpecifier = (specifier, relativeOnly = false) => {
+  const base = globalThis.__perenEntryModuleSpecifier;
+  if (typeof base !== "string" || base.length === 0) {
+    throw new TypeError("Worker entry module is unavailable for dynamic import");
+  }
+  if (specifier === undefined || specifier === null) return base;
+  const value = String(specifier);
+  if (value.length === 0) throw new TypeError("module specifier cannot be empty");
+  if (/^(?:https?:|node:|npm:|jsr:)/.test(value)) {
+    throw new TypeError(`unsupported dynamic module specifier ${value}`);
+  }
+  if (relativeOnly && !/^(?:\.\/|\.\.\/)/.test(value)) {
+    throw new TypeError("loader lookup specifier must be relative");
+  }
+  return new URL(value, base).href;
+};
 
+const loaderImport = async (specifier, relativeOnly = false) => await import(loaderSpecifier(specifier, relativeOnly));
+
+const loaderExport = (module, exportName, kind) => {
+  const key = String(exportName);
+  const value = module?.[key];
+  if (value === undefined) throw new TypeError(`module does not export ${kind} ${key}`);
+  return value;
+};
+
+const loaderClass = (module, className) => {
+  const value = loaderExport(module, className, "Durable Object class");
+  if (typeof value !== "function") throw new TypeError(`Durable Object export ${String(className)} must be a class or constructor`);
+  try {
+    Reflect.construct(Object, [], value);
+  } catch {
+    throw new TypeError(`Durable Object export ${String(className)} must be a class or constructor`);
+  }
+  return value;
+};
