@@ -13,7 +13,7 @@ use crate::{config::validate_probe, tls::client_options};
 #[derive(Clone)]
 pub struct BucketStore {
     pub(crate) store: Arc<dyn ObjectStore>,
-    pub(crate) cas: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) local_conditional_fallback: Option<Arc<tokio::sync::Mutex<()>>>,
 }
 
 impl BucketStore {
@@ -21,13 +21,16 @@ impl BucketStore {
     pub fn new(store: Arc<dyn ObjectStore>) -> Self {
         Self {
             store,
-            cas: Arc::new(tokio::sync::Mutex::new(())),
+            local_conditional_fallback: None,
         }
     }
 
     pub fn file(root: impl AsRef<std::path::Path>) -> Result<Self, BuildError> {
         let store = LocalFileSystem::new_with_prefix(root).map_err(BuildError)?;
-        Ok(Self::new(Arc::new(store)))
+        Ok(Self {
+            store: Arc::new(store),
+            local_conditional_fallback: Some(Arc::new(tokio::sync::Mutex::new(()))),
+        })
     }
 
     pub fn s3_instance_role(options: S3Options) -> Result<Self, BuildError> {

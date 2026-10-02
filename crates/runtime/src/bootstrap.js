@@ -1811,6 +1811,9 @@ class DurableObjectId {
   }
 }
 
+globalThis.__perenCreateDurableObjectId = (namespace, value, name = null) =>
+  ObjectFreeze(new DurableObjectId(String(namespace), String(value), name == null ? null : String(name)));
+
 class DurableObjectStub {
   constructor(id, className) {
     this.id = id;
@@ -1825,6 +1828,7 @@ class DurableObjectStub {
       id: this.id.value,
       name: this.id.name ?? null,
       className: this.className,
+      props: this.props ?? {},
       request: {
         method: request.method,
         url: request.url,
@@ -1858,11 +1862,12 @@ class DurableObjectNamespace {
   newUniqueId() {
     return ObjectFreeze(new DurableObjectId(this.binding, `unique:${workflowId()}`));
   }
-  get(id) {
+  get(id, options = {}) {
     if (!(id instanceof DurableObjectId) || id.namespace !== this.binding) {
       throw new TypeError("Durable Object id belongs to a different namespace");
     }
     const stub = new DurableObjectStub(id, this.className);
+    stub.props = ObjectFreeze({ ...(options.props ?? options.startupProps ?? {}) });
     return rpcProxy(stub, async (method, args) => {
       const response = await stub.fetch(rpcRequest(method, args));
       return await readRpcResponse(response);

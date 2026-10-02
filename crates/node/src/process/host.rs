@@ -948,6 +948,12 @@ async fn dispatch_object(
             )
             .await?;
             resident.bind_durable_class(&fetch.class_name)?;
+            resident.bind_durable_object_context(
+                &fetch.namespace,
+                &fetch.id,
+                fetch.name.as_deref(),
+                &fetch.props,
+            )?;
             let dispatch_started = Instant::now();
             let response = resident.dispatch_http(fetch.request, invocation).await?;
             resident

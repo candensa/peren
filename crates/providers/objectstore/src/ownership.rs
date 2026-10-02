@@ -87,8 +87,12 @@ impl BucketStore {
                 .await
             {
                 Err(error) if is_conditional_conflict(&error) => last = Some(error),
-                Err(object_store::Error::NotImplemented) => {
-                    return self.put_conditional_fallback(key, bytes, &options).await;
+                Err(object_store::Error::NotImplemented)
+                    if self.local_conditional_fallback.is_some() =>
+                {
+                    return self
+                        .put_local_conditional_fallback(key, bytes, &options)
+                        .await;
                 }
                 result => return result,
             }
@@ -96,7 +100,7 @@ impl BucketStore {
         Err(last.expect("conditional conflict retry loop records the last error"))
     }
 
-    async fn put_conditional_fallback(
+    async fn put_local_conditional_fallback(
         &self,
         key: &Path,
         bytes: Vec<u8>,
@@ -105,7 +109,10 @@ impl BucketStore {
         let PutMode::Update(version) = &options.mode else {
             return Err(object_store::Error::NotImplemented);
         };
-        let _lock = self.cas.lock().await;
+        let Some(lock) = &self.local_conditional_fallback else {
+            return Err(object_store::Error::NotImplemented);
+        };
+        let _lock = lock.lock().await;
         let expected = version.e_tag.clone();
         match self.store.get(key).await {
             Ok(current) if current.meta.e_tag == expected => {}
@@ -167,6 +174,9 @@ impl OwnershipRepository for BucketStore {
                 .map(CreateOutcome::Created)
                 .ok_or(OwnershipError::Malformed),
             Err(error) if is_cas_rejection(&error) => Ok(CreateOutcome::Exists),
+            Err(error) if is_unsupported_conditional_write(&error) => {
+                Err(OwnershipError::Unavailable)
+            }
             Err(_) => match self.load(ownership.cell).await? {
                 Some(stored) if stored.ownership == ownership => {
                     Ok(CreateOutcome::Created(stored.version))
@@ -196,6 +206,9 @@ impl OwnershipRepository for BucketStore {
                 .map(ReplaceOutcome::Replaced)
                 .ok_or(OwnershipError::Malformed),
             Err(error) if is_cas_rejection(&error) => Ok(ReplaceOutcome::Changed),
+            Err(error) if is_unsupported_conditional_write(&error) => {
+                Err(OwnershipError::Unavailable)
+            }
             Err(_) => match self.load(next.cell).await? {
                 Some(stored) if stored.ownership == next => {
                     Ok(ReplaceOutcome::Replaced(stored.version))
@@ -253,6 +266,10 @@ fn owner_key(cell: CellId) -> Path {
 
 fn map_ownership_error(_: object_store::Error) -> OwnershipError {
     OwnershipError::Unavailable
+}
+
+fn is_unsupported_conditional_write(error: &object_store::Error) -> bool {
+    matches!(error, object_store::Error::NotImplemented)
 }
 
 pub(crate) fn is_cas_rejection(error: &object_store::Error) -> bool {
@@ -313,5 +330,12 @@ mod tests {
         assert!(is_cas_rejection(&exists));
         assert!(!is_conditional_conflict(&stale));
         assert!(is_cas_rejection(&stale));
+    }
+
+    #[test]
+    fn unsupported_conditional_writes_are_never_fallback_safe() {
+        assert!(is_unsupported_conditional_write(
+            &object_store::Error::NotImplemented
+        ));
     }
 }

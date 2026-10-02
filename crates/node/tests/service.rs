@@ -149,6 +149,85 @@ service = "api"
 }
 
 #[tokio::test]
+async fn durable_object_stub_fetch_preserves_constructor_context() {
+    let api = TestWorker::from_source(
+        "export default { async fetch(_request, env) {
+            const id = env.ROOMS.idFromName('lobby');
+            const stub = env.ROOMS.get(id, { props: { region: 'eu', shard: 3 } });
+            const response = await stub.fetch('https://room.internal/context');
+            return new Response(`${response.status}:${await response.text()}`);
+        } };",
+    );
+    let room = TestWorker::from_source(
+        "export class Room extends DurableObject {
+            async fetch() {
+                return Response.json({
+                    id: this.ctx.id.toString(),
+                    name: this.ctx.id.name,
+                    region: this.ctx.props.region,
+                    shard: this.ctx.props.shard,
+                    frozen: Object.isFrozen(this.ctx.props),
+                }, { status: 209 });
+            }
+        }
+        export default {};",
+    );
+    let environment = DataEnv::new();
+    let config = FleetConfig::from_toml(&format!(
+        r#"
+[node]
+node_id = "00000000-0000-0000-0000-000000000001"
+advertise_addr = "127.0.0.1:0"
+listen = "127.0.0.1:0"
+[bucket]
+kind = "memory"
+[mtls]
+ca_cert_path = "ca.pem"
+leaf_cert_path = "leaf.pem"
+leaf_key_path = "key.pem"
+[[services]]
+name = "api"
+worker_bundle_path = "{}"
+compatibility_date = "2026-01-01"
+[services.bindings.ROOMS]
+type = "durable_object_namespace"
+class_name = "Room"
+unique_key = "rooms"
+[[services]]
+name = "room"
+worker_bundle_path = "{}"
+compatibility_date = "2026-01-01"
+[services.entrypoint]
+kind = "durable_object"
+class_name = "Room"
+unique_key = "rooms"
+id_from = {{ source = "first_path_segment" }}
+[[sockets]]
+name = "public"
+listen = "127.0.0.1:0"
+service = "api"
+"#,
+        api.path().display(),
+        room.path().display()
+    ))
+    .unwrap()
+    .validate()
+    .unwrap();
+    let process = Process::start(config, &environment).await.unwrap();
+    let address = process.listeners()["public"];
+
+    let response = get(address, "/context").await;
+
+    assert!(
+        response.contains(
+            r#"209:{"id":"ROOMS:name:bG9iYnk=","name":"lobby","region":"eu","shard":3,"frozen":true}"#
+        ),
+        "{response}"
+    );
+    process.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn service_binding_invokes_exported_rpc_method() {
     let api = TestWorker::from_source(
         "export default { async fetch(_request, env) {

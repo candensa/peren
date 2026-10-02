@@ -208,6 +208,8 @@ pub struct DurableObjectFetch {
     pub id: String,
     pub name: Option<String>,
     pub class_name: String,
+    #[serde(default)]
+    pub props: serde_json::Value,
     pub request: HttpRequest,
 }
 

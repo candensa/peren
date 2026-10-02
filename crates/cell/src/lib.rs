@@ -1,4 +1,4 @@
-use std::{num::NonZeroUsize, path::Path, sync::Arc};
+use std::{future::Future, num::NonZeroUsize, path::Path, pin::Pin, sync::Arc};
 
 use peren_bindings::SharedStorageHost;
 use peren_primitives::{CellId, NodeId, OwnershipEpoch};
@@ -180,21 +180,25 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         Ok(())
     }
 
+    pub fn bind_durable_object_context(
+        &mut self,
+        namespace: &str,
+        id: &str,
+        name: Option<&str>,
+        props: &serde_json::Value,
+    ) -> Result<(), CellError> {
+        self.runtime
+            .bind_durable_object_context(namespace, id, name, props)?;
+        Ok(())
+    }
+
     pub async fn dispatch_http(
         &mut self,
         request: HttpRequest,
         limits: InvocationLimits,
     ) -> Result<HttpResponse, CellError> {
-        self.ensure_active()?;
-        self.last_commit = None;
-        self.verify().await?;
-        let response = self.runtime.dispatch_http(request, limits).await?;
-        let revision = self.runtime.committed_revision();
-        if revision.get() > 0 {
-            self.publish(revision).await?;
-        }
-        self.verify().await?;
-        Ok(response)
+        self.dispatch_with_lifecycle(|runtime| Box::pin(runtime.dispatch_http(request, limits)))
+            .await
     }
 
     pub fn take_console_events(&mut self) -> Vec<WorkerLogEvent> {
@@ -207,96 +211,63 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
     }
 
     pub async fn dispatch_alarm(&mut self) -> Result<(), CellError> {
-        self.ensure_active()?;
-        self.last_commit = None;
-        self.verify().await?;
-        self.runtime.dispatch_alarm().await?;
-        let revision = self.runtime.committed_revision();
-        if revision.get() > 0 {
-            self.publish(revision).await?;
-        }
-        self.verify().await
+        self.dispatch_with_lifecycle(|runtime| Box::pin(runtime.dispatch_alarm()))
+            .await
     }
 
     pub async fn dispatch_scheduled(&mut self, event: ScheduledEvent) -> Result<(), CellError> {
-        self.ensure_active()?;
-        self.last_commit = None;
-        self.verify().await?;
-        self.runtime.dispatch_scheduled(event).await?;
-        let revision = self.runtime.committed_revision();
-        if revision.get() > 0 {
-            self.publish(revision).await?;
-        }
-        self.verify().await
+        self.dispatch_with_lifecycle(|runtime| Box::pin(runtime.dispatch_scheduled(event)))
+            .await
     }
 
     pub async fn dispatch_queue(&mut self, event: QueueEvent) -> Result<QueueDispatch, CellError> {
-        self.ensure_active()?;
-        self.last_commit = None;
-        self.verify().await?;
-        let dispatch = self.runtime.dispatch_queue(event).await?;
-        let revision = self.runtime.committed_revision();
-        if revision.get() > 0 {
-            self.publish(revision).await?;
-        }
-        self.verify().await?;
-        Ok(dispatch)
+        self.dispatch_with_lifecycle(|runtime| Box::pin(runtime.dispatch_queue(event)))
+            .await
     }
 
     pub async fn dispatch_tail(&mut self, event: TailEvent) -> Result<(), CellError> {
-        self.ensure_active()?;
-        self.last_commit = None;
-        self.verify().await?;
-        self.runtime.dispatch_tail(event).await?;
-        let revision = self.runtime.committed_revision();
-        if revision.get() > 0 {
-            self.publish(revision).await?;
-        }
-        self.verify().await
+        self.dispatch_with_lifecycle(|runtime| Box::pin(runtime.dispatch_tail(event)))
+            .await
     }
 
     pub async fn dispatch_websocket_message(
         &mut self,
         event: WebSocketMessageEvent,
     ) -> Result<WebSocketDispatch, CellError> {
-        self.ensure_active()?;
-        self.last_commit = None;
-        self.verify().await?;
-        let dispatch = self.runtime.dispatch_websocket_message(event).await?;
-        let revision = self.runtime.committed_revision();
-        if revision.get() > 0 {
-            self.publish(revision).await?;
-        }
-        self.verify().await?;
-        Ok(dispatch)
+        self.dispatch_with_lifecycle(|runtime| Box::pin(runtime.dispatch_websocket_message(event)))
+            .await
     }
 
     pub async fn dispatch_websocket_close(
         &mut self,
         event: WebSocketCloseEvent,
     ) -> Result<WebSocketDispatch, CellError> {
-        self.ensure_active()?;
-        self.last_commit = None;
-        self.verify().await?;
-        let dispatch = self.runtime.dispatch_websocket_close(event).await?;
-        let revision = self.runtime.committed_revision();
-        if revision.get() > 0 {
-            self.publish(revision).await?;
-        }
-        self.verify().await?;
-        Ok(dispatch)
+        self.dispatch_with_lifecycle(|runtime| Box::pin(runtime.dispatch_websocket_close(event)))
+            .await
     }
 
     pub async fn dispatch_workflow(&mut self, event: WorkflowEvent) -> Result<(), CellError> {
+        self.dispatch_with_lifecycle(|runtime| Box::pin(runtime.dispatch_workflow(event)))
+            .await
+    }
+
+    async fn dispatch_with_lifecycle<T>(
+        &mut self,
+        dispatch: impl for<'a> FnOnce(
+            &'a mut WorkerRuntime,
+        )
+            -> Pin<Box<dyn Future<Output = Result<T, EngineError>> + 'a>>,
+    ) -> Result<T, CellError> {
         self.ensure_active()?;
         self.last_commit = None;
         self.verify().await?;
-        self.runtime.dispatch_workflow(event).await?;
+        let result = dispatch(&mut self.runtime).await?;
         let revision = self.runtime.committed_revision();
         if revision.get() > 0 {
             self.publish(revision).await?;
         }
-        self.verify().await
+        self.verify().await?;
+        Ok(result)
     }
 
     pub async fn checkpoint(&mut self) -> Result<(), CellError> {

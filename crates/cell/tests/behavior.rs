@@ -14,7 +14,8 @@ use peren_primitives::{CellId, NodeId, OwnershipEpoch};
 use peren_replication::{ReplicaImage, ReplicaPayload, ReplicaRepository, RepositoryError};
 use peren_runtime::{
     HttpRequest, InvocationLimits, IsolateLimits, Module, ModuleKind, ModuleName, QueueEvent,
-    QueueMetrics, ScheduledEvent, TailEvent, WorkerBundle, WorkerEnvironment,
+    QueueMetrics, ScheduledEvent, TailEvent, WebSocketCloseEvent, WebSocketMessageEvent,
+    WorkerBundle, WorkerEnvironment, WorkflowEvent,
 };
 use peren_storage::CellStorage;
 use uuid::Uuid;
@@ -235,6 +236,45 @@ fn tail_bundle() -> WorkerBundle {
                 await Peren.storage.transaction(async (storage) => {
                   await storage.put('counter', new Uint8Array([event.events[0].wallTimeMs]));
                 });
+              },
+              async fetch() {
+                const value = await Peren.storage.get('counter');
+                return new Response(String(value?.[0] ?? 0));
+              }
+            };",
+    )
+}
+
+fn workflow_bundle() -> WorkerBundle {
+    bundle(
+        "export default {
+              async workflow(event) {
+                await Peren.storage.transaction(async (storage) => {
+                  await storage.put('counter', new Uint8Array([event.payload.value]));
+                });
+              },
+              async fetch() {
+                const value = await Peren.storage.get('counter');
+                return new Response(String(value?.[0] ?? 0));
+              }
+            };",
+    )
+}
+
+fn websocket_bundle() -> WorkerBundle {
+    bundle(
+        "export default {
+              async webSocketMessage(_socket, message) {
+                await Peren.storage.transaction(async (storage) => {
+                  await storage.put('counter', new Uint8Array([message.charCodeAt(0)]));
+                });
+                return { outbound: [] };
+              },
+              async webSocketClose(_socket, code) {
+                await Peren.storage.transaction(async (storage) => {
+                  await storage.put('counter', new Uint8Array([code - 1000]));
+                });
+                return { outbound: [] };
               },
               async fetch() {
                 const value = await Peren.storage.get('counter');

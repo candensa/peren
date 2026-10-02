@@ -20,7 +20,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.0
       - run: cargo fmt --all -- --check
 
   advisories:
@@ -39,7 +41,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.0
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: release-tests
@@ -81,8 +85,9 @@ jobs:
             target: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.97.0
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
