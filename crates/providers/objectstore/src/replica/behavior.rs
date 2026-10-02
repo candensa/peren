@@ -363,6 +363,21 @@ async fn replica_prune_removes_only_objects_unreachable_from_root() {
         .await
         .unwrap();
 
+    let retained_by_age = store.prune_replicas(true, 60).await.unwrap();
+    assert_eq!(retained_by_age.cells_scanned, 1);
+    assert_eq!(retained_by_age.objects_retained, 3);
+    assert_eq!(retained_by_age.objects_removed, 0);
+    assert!(
+        objects
+            .get(&wal_key(
+                cell,
+                OwnershipEpoch::new(1),
+                StorageRevision::new(2)
+            ))
+            .await
+            .is_ok()
+    );
+
     let dry = store.prune_replicas(true, 0).await.unwrap();
     assert!(dry.dry_run);
     assert_eq!(dry.cells_scanned, 1);

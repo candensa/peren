@@ -291,7 +291,7 @@ At least one service is required. Each entry is one Worker bundle and its bindin
 | `services[].compatibility_date` | date string | yes | none | `YYYY-MM-DD` | compatibility resolution | invalid date fails validation |
 | `services[].compatibility_flags` | array of strings | no | `[]` | flag names | compatibility resolution | unknown combinations follow compatibility resolution rules |
 | `services[].vars` | string map | no | empty | string values | `env` plain variables | type errors fail parse |
-| `services[].expose_node_id` | bool | no | `false` | `true`, `false` | injects `PEREN_NODE_ID` into `env` | `PEREN_NODE_ID` in `vars` is reserved when enabled |
+| `services[].expose_node_id` | bool | no | `false` | `true`, `false` | injects `PEREN_NODE_ID` into `env` | `PEREN_NODE_ID` in `vars`, `secrets`, `secrets_store_refs`, or as a `secrets_store_secret` binding name is reserved when enabled |
 | `services[].secrets` | map of secret declarations | no | empty | env var name string, or `{ source = "env" \| "store", name = "..." }` | `env` secret strings | missing secret material fails before listeners open |
 | `services[].secrets_store_refs` | string map | no | empty | keys into `[secrets_store]` | secrets | unknown store name fails validation |
 | `services[].consumes_queues` | array | no | `[]` | queue name string, or `{ queue = "...", ...overrides }` | queue consumers | invalid overrides fail validation |

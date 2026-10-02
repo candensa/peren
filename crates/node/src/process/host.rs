@@ -448,7 +448,7 @@ pub(super) fn is_forbidden_worker_egress(url: &reqwest::Url) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
-    host.parse::<IpAddr>().is_ok_and(forbidden_worker_ip)
+    url_ip_literal(url).is_some_and(forbidden_worker_ip)
 }
 
 pub(in crate::process) struct WorkerEgressResolution {
@@ -476,7 +476,7 @@ pub(super) async fn resolve_worker_egress(
             pinned: None,
         });
     }
-    if let Ok(address) = host.parse::<IpAddr>() {
+    if let Some(address) = url_ip_literal(url) {
         return Ok(WorkerEgressResolution {
             forbidden: forbidden_worker_ip(address),
             pinned: None,
@@ -504,6 +504,14 @@ pub(super) async fn resolve_worker_egress(
             addresses,
         }),
     })
+}
+
+fn url_ip_literal(url: &reqwest::Url) -> Option<IpAddr> {
+    match url.host()? {
+        url::Host::Ipv4(address) => Some(IpAddr::V4(address)),
+        url::Host::Ipv6(address) => Some(IpAddr::V6(address)),
+        url::Host::Domain(_) => None,
+    }
 }
 
 pub(super) fn forbidden_worker_ip(address: IpAddr) -> bool {
@@ -1218,6 +1226,13 @@ mod tests {
     #[test]
     fn worker_egress_rejects_localhost_hosts() {
         let url = reqwest::Url::parse("https://localhost/metadata").unwrap();
+
+        assert!(is_forbidden_worker_egress(&url));
+    }
+
+    #[test]
+    fn worker_egress_rejects_bracketed_ipv6_loopback_literal() {
+        let url = reqwest::Url::parse("https://[::1]/metadata").unwrap();
 
         assert!(is_forbidden_worker_egress(&url));
     }
