@@ -1,4 +1,10 @@
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use axum::{
     body::Body,
@@ -13,6 +19,7 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Session {
+    pub(crate) host_id: String,
     pub(crate) id: String,
     pub(crate) service: String,
     pub(crate) path: String,
@@ -21,13 +28,20 @@ pub(crate) struct Session {
 
 #[derive(Default)]
 pub(crate) struct Registry {
+    next: AtomicU64,
     sessions: Mutex<BTreeMap<String, Session>>,
 }
 
 impl Registry {
-    pub(crate) fn record(&self, session: Session) -> Result<bool, RegistryError> {
+    pub(crate) fn record(&self, mut session: Session) -> Result<Session, RegistryError> {
+        let host_id = format!(
+            "conn-{}",
+            self.next.fetch_add(1, Ordering::Relaxed).saturating_add(1)
+        );
+        session.host_id = host_id;
         let mut sessions = self.sessions.lock().map_err(|_| RegistryError::Poisoned)?;
-        Ok(sessions.insert(session.id.clone(), session).is_none())
+        sessions.insert(session.host_id.clone(), session.clone());
+        Ok(session)
     }
 
     pub(crate) fn get(&self, id: &str) -> Result<Option<Session>, RegistryError> {
@@ -205,15 +219,18 @@ mod tests {
     fn registry_records_session_metadata_once() {
         let registry = Registry::default();
         let session = Session {
+            host_id: String::new(),
             id: "socket-1".into(),
             service: "api".into(),
             path: "/chat".into(),
             cell: cell(7),
         };
 
-        assert!(registry.record(session.clone()).unwrap());
-        assert!(!registry.record(session.clone()).unwrap());
-        assert_eq!(registry.len().unwrap(), 1);
-        assert_eq!(registry.get("socket-1").unwrap(), Some(session));
+        let first = registry.record(session.clone()).unwrap();
+        let second = registry.record(session).unwrap();
+        assert_ne!(first.host_id, second.host_id);
+        assert_eq!(registry.len().unwrap(), 2);
+        assert_eq!(registry.get(&first.host_id).unwrap(), Some(first.clone()));
+        assert_eq!(registry.get(&second.host_id).unwrap(), Some(second));
     }
 }
