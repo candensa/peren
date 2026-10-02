@@ -244,6 +244,8 @@ pub struct Limits {
     pub isolate_fair_share_percent: u8,
     #[serde(default = "checkpoint")]
     pub checkpoint_threshold_bytes: u64,
+    #[serde(default = "replica_retention")]
+    pub replica_retention_secs: u64,
     #[serde(default = "cpu_time", rename = "max_cpu_time_ms")]
     pub cpu_time_ms: u64,
     #[serde(default = "cron_base")]
@@ -265,6 +267,7 @@ impl Default for Limits {
             isolates: isolates(),
             isolate_fair_share_percent: fair_share(),
             checkpoint_threshold_bytes: checkpoint(),
+            replica_retention_secs: replica_retention(),
             cpu_time_ms: cpu_time(),
             cron_retry_base_ms: cron_base(),
             cron_retry_max_attempts: cron_attempts(),
@@ -351,6 +354,9 @@ const fn fair_share() -> u8 {
 }
 const fn checkpoint() -> u64 {
     4 * 1024 * 1024
+}
+const fn replica_retention() -> u64 {
+    7 * 24 * 60 * 60
 }
 const fn cpu_time() -> u64 {
     30_000

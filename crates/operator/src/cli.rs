@@ -369,12 +369,13 @@ pub struct D1Restore {
 
 #[derive(Debug, Subcommand)]
 pub enum Storage {
-    Prune {
+    #[command(alias = "prune")]
+    Collect {
         config: PathBuf,
         #[arg(long)]
         dry_run: bool,
     },
-    DeleteCell {
+    Erase {
         config: PathBuf,
         #[arg(long)]
         cell: String,

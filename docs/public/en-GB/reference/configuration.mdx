@@ -132,6 +132,7 @@ Optional table. Defaults apply when omitted. Restart required to change.
 | `limits.max_isolates` | usize | no | `256` | greater than zero | isolate admission | `0` fails validation; saturation refuses new work |
 | `limits.isolate_fair_share_percent` | u8 | no | `25` | `1`–`100` | validation only in this build | outside range fails validation |
 | `limits.checkpoint_threshold_bytes` | u64 | no | `4194304` (4 MiB) | non-negative integer | cell replica checkpoint threshold | type errors fail parse |
+| `limits.replica_retention_secs` | u64 | no | `604800` (7 days) | non-negative integer | storage collection retention for obsolete replica objects | type errors fail parse |
 | `limits.max_cpu_time_ms` | u64 | no | `30000` | non-negative integer | stored in config | not applied on the live HTTP path in this build |
 | `limits.cron_retry_base_ms` | u64 | no | `2000` | greater than zero when cron retries are enabled | validation | `0` with `cron_retry_max_attempts > 0` fails validation |
 | `limits.cron_retry_max_attempts` | u32 | no | `6` | non-negative integer | accepted in config | type errors fail parse |

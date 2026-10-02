@@ -7,10 +7,11 @@ use crate::{Environment, ProviderError, Providers};
 #[derive(Debug)]
 pub struct Prune {
     pub dry_run: bool,
+    pub retention_secs: u64,
 }
 
 #[derive(Debug)]
-pub struct DeleteCell {
+pub struct EraseCell {
     pub cell: CellId,
     pub dry_run: bool,
 }
@@ -23,15 +24,15 @@ pub async fn prune_replicas(
     let providers = Providers::build(&config, environment).await?;
     providers
         .repository
-        .prune_replicas(request.dry_run)
+        .prune_replicas(request.dry_run, request.retention_secs)
         .await
         .map_err(Error::Replica)
 }
 
-pub async fn delete_cell_replicas(
+pub async fn erase_cell_replicas(
     config: peren_config::ValidatedConfig,
     environment: &impl Environment,
-    request: DeleteCell,
+    request: EraseCell,
 ) -> Result<ReplicaDeleteReport, Error> {
     let providers = Providers::build(&config, environment).await?;
     providers

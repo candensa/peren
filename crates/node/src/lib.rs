@@ -104,8 +104,8 @@ pub use secret::{
     list as list_secrets, rotate as rotate_secret,
 };
 pub use storage::{
-    DeleteCell as StorageDeleteCell, Error as StorageError, Prune as StoragePrune,
-    delete_cell_replicas as delete_cell_storage, prune_replicas as prune_storage,
+    EraseCell as StorageEraseCell, Error as StorageError, Prune as StoragePrune,
+    erase_cell_replicas as erase_cell_storage, prune_replicas as prune_storage,
 };
 pub use supervisor::{Phase, Shutdown, Supervisor, SupervisorError, TaskError};
 pub use tail::{

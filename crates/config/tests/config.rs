@@ -73,6 +73,42 @@ fn validation_accumulates_independent_problems() {
 }
 
 #[test]
+fn expose_node_id_reserves_all_worker_environment_writers() {
+    let source = MINIMAL.replace(
+        r#"compatibility_date = "2026-01-01""#,
+        r#"compatibility_date = "2026-01-01"
+expose_node_id = true
+
+[services.vars]
+PEREN_NODE_ID = "var"
+
+[services.secrets]
+PEREN_NODE_ID = "PEREN_SECRET_NODE_ID"
+
+[services.secrets_store_refs]
+PEREN_NODE_ID = "stored-node-id"
+
+[services.bindings.PEREN_NODE_ID]
+type = "secrets_store_secret"
+secret_name = "stored-node-id""#,
+    );
+    let error = FleetConfig::from_toml(&source)
+        .unwrap()
+        .validate()
+        .unwrap_err();
+    let fields: Vec<_> = error
+        .problems()
+        .iter()
+        .map(|problem| problem.field.as_str())
+        .collect();
+
+    assert!(fields.contains(&"services[0].vars.PEREN_NODE_ID"));
+    assert!(fields.contains(&"services[0].secrets.PEREN_NODE_ID"));
+    assert!(fields.contains(&"services[0].secrets_store_refs.PEREN_NODE_ID"));
+    assert!(fields.contains(&"services[0].bindings.PEREN_NODE_ID"));
+}
+
+#[test]
 fn optional_root_tables_keep_their_compatibility_defaults() {
     let source = format!(
         "{MINIMAL}\n[deploy]\n\n[d1_time_travel]\n\n[workflow]\n\n[tracing]\n\n[containers]\n"

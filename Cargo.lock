@@ -3971,6 +3971,7 @@ name = "peren-provider-object-store"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "futures",
  "object_store",
  "peren-cell",

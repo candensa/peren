@@ -363,7 +363,7 @@ async fn replica_prune_removes_only_objects_unreachable_from_root() {
         .await
         .unwrap();
 
-    let dry = store.prune_replicas(true).await.unwrap();
+    let dry = store.prune_replicas(true, 0).await.unwrap();
     assert!(dry.dry_run);
     assert_eq!(dry.cells_scanned, 1);
     assert_eq!(dry.objects_retained, 1);
@@ -379,7 +379,7 @@ async fn replica_prune_removes_only_objects_unreachable_from_root() {
             .is_ok()
     );
 
-    let applied = store.prune_replicas(false).await.unwrap();
+    let applied = store.prune_replicas(false, 0).await.unwrap();
     assert!(!applied.dry_run);
     assert_eq!(applied.cells_scanned, 1);
     assert_eq!(applied.objects_retained, 1);

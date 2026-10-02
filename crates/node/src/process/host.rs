@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Write,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     process::{Command as ProcessCommand, Stdio},
     sync::Arc,
     time::Instant,
@@ -367,8 +367,7 @@ impl OutboundFetchHost for ProcessHost {
 impl ProcessHost {
     async fn fetch_aws_bound(&self, request: AwsSigv4Fetch) -> Result<HttpResponse, HostError> {
         let binding = self.aws.get(&request.binding).ok_or(HostError)?;
-        let client = crate::tls::client().map_err(|_| HostError)?;
-        super::aws::fetch(&client, binding, request).await
+        super::aws::fetch(binding, request).await
     }
 
     async fn fetch_outbound(&self, request: HttpRequest) -> Result<HttpResponse, HostError> {
@@ -377,18 +376,24 @@ impl ProcessHost {
         if !self.outbound_hosts.contains(&host) {
             return Err(HostError);
         }
-        if is_forbidden_worker_egress(&url) || resolves_to_forbidden_worker_egress(&url).await? {
+        let resolution = resolve_worker_egress(&url).await?;
+        if resolution.forbidden {
             return Err(HostError);
         }
         let method =
             reqwest::Method::from_bytes(request.method.as_bytes()).map_err(|_| HostError)?;
-        let client = match request.mtls.as_deref() {
-            Some(name) => {
-                let identity = self.mtls.get(name).ok_or(HostError)?.clone();
-                crate::tls::client_with_identity(Some(identity)).map_err(|_| HostError)?
-            }
-            None => crate::tls::client().map_err(|_| HostError)?,
+        let identity = match request.mtls.as_deref() {
+            Some(name) => Some(self.mtls.get(name).ok_or(HostError)?.clone()),
+            None => None,
         };
+        let client = crate::tls::client_with_identity_and_resolution(
+            identity,
+            resolution
+                .pinned
+                .as_ref()
+                .map(|pinned| (pinned.host.as_str(), pinned.addresses.as_slice())),
+        )
+        .map_err(|_| HostError)?;
         let mut builder = client.request(method, url).body(request.body);
         for (name, value) in request.headers {
             builder = builder.header(name, value);
@@ -435,6 +440,7 @@ fn request_host(url: &reqwest::Url) -> Option<String> {
     })
 }
 
+#[cfg(test)]
 pub(super) fn is_forbidden_worker_egress(url: &reqwest::Url) -> bool {
     let Some(host) = url.host_str() else {
         return true;
@@ -445,35 +451,86 @@ pub(super) fn is_forbidden_worker_egress(url: &reqwest::Url) -> bool {
     host.parse::<IpAddr>().is_ok_and(forbidden_worker_ip)
 }
 
-pub(super) async fn resolves_to_forbidden_worker_egress(
+pub(in crate::process) struct WorkerEgressResolution {
+    pub(in crate::process) forbidden: bool,
+    pub(in crate::process) pinned: Option<PinnedWorkerEgress>,
+}
+
+pub(in crate::process) struct PinnedWorkerEgress {
+    pub(in crate::process) host: String,
+    pub(in crate::process) addresses: Vec<SocketAddr>,
+}
+
+pub(super) async fn resolve_worker_egress(
     url: &reqwest::Url,
-) -> Result<bool, HostError> {
+) -> Result<WorkerEgressResolution, HostError> {
     let Some(host) = url.host_str() else {
-        return Ok(true);
+        return Ok(WorkerEgressResolution {
+            forbidden: true,
+            pinned: None,
+        });
     };
-    if host.parse::<IpAddr>().is_ok() || host.eq_ignore_ascii_case("localhost") {
-        return Ok(false);
+    if host.eq_ignore_ascii_case("localhost") {
+        return Ok(WorkerEgressResolution {
+            forbidden: true,
+            pinned: None,
+        });
+    }
+    if let Ok(address) = host.parse::<IpAddr>() {
+        return Ok(WorkerEgressResolution {
+            forbidden: forbidden_worker_ip(address),
+            pinned: None,
+        });
     }
     let port = url.port_or_known_default().ok_or(HostError)?;
     let addresses = tokio::net::lookup_host((host, port))
         .await
-        .map_err(|_| HostError)?;
-    Ok(addresses
-        .map(|address| address.ip())
-        .any(forbidden_worker_ip))
+        .map_err(|_| HostError)?
+        .collect::<Vec<_>>();
+    if addresses.is_empty()
+        || addresses
+            .iter()
+            .any(|address| forbidden_worker_ip(address.ip()))
+    {
+        return Ok(WorkerEgressResolution {
+            forbidden: true,
+            pinned: None,
+        });
+    }
+    Ok(WorkerEgressResolution {
+        forbidden: false,
+        pinned: Some(PinnedWorkerEgress {
+            host: host.to_string(),
+            addresses,
+        }),
+    })
 }
 
-fn forbidden_worker_ip(address: IpAddr) -> bool {
+pub(super) fn forbidden_worker_ip(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => {
+            let octets = address.octets();
             address.is_loopback()
                 || address.is_private()
                 || address.is_link_local()
                 || address.is_broadcast()
                 || address.is_documentation()
                 || address.is_unspecified()
+                || octets[0] == 0
+                || (octets[0] == 100 && (octets[1] & 0xc0) == 64)
+                || (octets[0] == 198 && (octets[1] & 0xfe) == 18)
+                || octets[0] >= 240
         }
         IpAddr::V6(address) => {
+            if let Some(mapped) = address.to_ipv4_mapped() {
+                return forbidden_worker_ip(IpAddr::V4(mapped));
+            }
+            if matches!(address.segments(), [0x0064, 0xff9b, 0, 0, 0, 0, _, _]) {
+                let octets = address.octets();
+                return forbidden_worker_ip(IpAddr::V4(Ipv4Addr::new(
+                    octets[12], octets[13], octets[14], octets[15],
+                )));
+            }
             address.is_loopback()
                 || address.is_unspecified()
                 || matches!(address.segments()[0] & 0xfe00, 0xfc00)
@@ -1131,4 +1188,37 @@ pub(super) fn cell(service: &str, path: &str) -> CellId {
     digest.update([0]);
     digest.update(id.as_bytes());
     CellId::from_bytes(digest.finalize().into())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use super::{forbidden_worker_ip, is_forbidden_worker_egress};
+
+    #[test]
+    fn worker_egress_rejects_reserved_ipv4_and_embedded_ipv6() {
+        for address in [
+            IpAddr::V4(Ipv4Addr::new(0, 1, 2, 3)),
+            IpAddr::V4(Ipv4Addr::new(100, 64, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(198, 18, 0, 1)),
+            IpAddr::V4(Ipv4Addr::new(240, 0, 0, 1)),
+            IpAddr::V6(Ipv6Addr::from_bits(0xffff_0a00_0001)),
+            IpAddr::V6(Ipv6Addr::from_bits(
+                0x0064_ff9b_0000_0000_0000_0000_0a00_0001,
+            )),
+        ] {
+            assert!(forbidden_worker_ip(address), "{address}");
+        }
+        assert!(!forbidden_worker_ip(IpAddr::V4(Ipv4Addr::new(
+            93, 184, 216, 34
+        ))));
+    }
+
+    #[test]
+    fn worker_egress_rejects_localhost_hosts() {
+        let url = reqwest::Url::parse("https://localhost/metadata").unwrap();
+
+        assert!(is_forbidden_worker_egress(&url));
+    }
 }

@@ -76,13 +76,14 @@ impl Repository {
     pub async fn prune_replicas(
         &self,
         dry_run: bool,
+        retention_secs: u64,
     ) -> Result<peren_provider_object_store::ReplicaPruneReport, ReplicaError> {
         match self {
             Self::Memory(_) => Ok(peren_provider_object_store::ReplicaPruneReport {
                 dry_run,
                 ..peren_provider_object_store::ReplicaPruneReport::default()
             }),
-            Self::Bucket(store) => store.prune_replicas(dry_run).await,
+            Self::Bucket(store) => store.prune_replicas(dry_run, retention_secs).await,
         }
     }
 

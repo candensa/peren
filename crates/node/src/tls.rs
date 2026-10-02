@@ -1,15 +1,22 @@
-use std::path::{Path, PathBuf};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 use thiserror::Error;
 
-pub(crate) fn client() -> Result<reqwest::Client, TlsError> {
-    TrustPolicy::from_env().client()
-}
-
+#[cfg(test)]
 pub(crate) fn client_with_identity(
     identity: Option<Identity>,
 ) -> Result<reqwest::Client, TlsError> {
     TrustPolicy::from_env().client_with_identity(identity)
+}
+
+pub(crate) fn client_with_identity_and_resolution(
+    identity: Option<Identity>,
+    resolution: Option<(&str, &[SocketAddr])>,
+) -> Result<reqwest::Client, TlsError> {
+    TrustPolicy::from_env().client_with_identity_and_resolution(identity, resolution)
 }
 
 #[derive(Clone, Debug)]
@@ -29,13 +36,23 @@ impl TrustPolicy {
         Self { cert_file }
     }
 
+    #[cfg(test)]
     pub(crate) fn client(&self) -> Result<reqwest::Client, TlsError> {
         self.client_with_identity(None)
     }
 
+    #[cfg(test)]
     pub(crate) fn client_with_identity(
         &self,
         identity: Option<Identity>,
+    ) -> Result<reqwest::Client, TlsError> {
+        self.client_with_identity_and_resolution(identity, None)
+    }
+
+    pub(crate) fn client_with_identity_and_resolution(
+        &self,
+        identity: Option<Identity>,
+        resolution: Option<(&str, &[SocketAddr])>,
     ) -> Result<reqwest::Client, TlsError> {
         let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none());
         if let Some(path) = &self.cert_file {
@@ -45,6 +62,9 @@ impl TrustPolicy {
         }
         if let Some(identity) = identity {
             builder = builder.identity(identity.into_reqwest()?);
+        }
+        if let Some((domain, addresses)) = resolution {
+            builder = builder.resolve_to_addrs(domain, addresses);
         }
         builder.build().map_err(TlsError::Client)
     }
