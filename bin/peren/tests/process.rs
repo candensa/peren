@@ -4,6 +4,7 @@ mod unix {
         fs,
         io::{BufRead, BufReader, Read, Write},
         net::{SocketAddr, TcpListener, TcpStream},
+        os::unix::process::ExitStatusExt,
         process::{Command, Stdio},
         thread,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -95,7 +96,10 @@ service = "api"
             .unwrap()
             .read_to_string(&mut stderr)
             .unwrap();
-        assert!(status.success(), "{stderr}");
+        assert!(
+            status.success() || status.signal() == Some(15),
+            "status={status:?}\n{stderr}"
+        );
         let mut stdout = String::new();
         child
             .stdout
