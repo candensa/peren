@@ -39,4 +39,18 @@ Ownership recovery that replaces a still-recorded owner advances the ownership e
 
 If acquisition fails after a crash mid-dispatch, check whether the ownership record still names an owner, whether the bucket accepts conditional writes and whether published replica objects for the cell are readable. Fix storage reachability and ownership before expecting a peer to serve the cell.
 
+## Failure triage
+
+Keep `node.node_id`, `node.listen`, the data directory and the bucket configuration stable across supervised restarts. Changing `node.node_id` creates a new peer identity; it does not prove that the previous process has safely drained.
+
+When a cell does not recover as expected:
+
+1. Run `peren conformance storage fleet.toml` against the same bucket configuration.
+2. Check node logs for fencing, publish, checkpoint or restore errors.
+3. Confirm the current bundle still contains the Durable Object namespace and service binding that address the cell.
+4. Run `peren storage collect fleet.toml --dry-run` to see whether obsolete replica objects are collectible. The command keeps the current restore plan and honors `limits.replica_retention_secs`.
+5. Use `peren storage erase fleet.toml --cell <cell-id> --dry-run` only when the product record for that cell has already been deleted and you intend to remove its durable recovery state.
+
+Do not erase a cell to fix a stuck recovery unless the desired outcome is permanent loss of that cell's prior state. Erasure removes restore inputs; it is not a repair operation.
+
 Read [Durability](/docs/concepts/durability/) for publish and fencing details and [Placement](/docs/concepts/placement/) for ownership versus preference.

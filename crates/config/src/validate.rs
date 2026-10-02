@@ -61,6 +61,36 @@ fn validate_services(
                 error.to_string(),
             )),
         }
+        if service.expose_node_id {
+            if service.vars.contains_key("PEREN_NODE_ID") {
+                problems.push(Problem::new(
+                    format!("services[{index}].vars.PEREN_NODE_ID"),
+                    "is reserved when expose_node_id is enabled",
+                ));
+            }
+            if service.secrets.contains_key("PEREN_NODE_ID") {
+                problems.push(Problem::new(
+                    format!("services[{index}].secrets.PEREN_NODE_ID"),
+                    "is reserved when expose_node_id is enabled",
+                ));
+            }
+            if service.secrets_store_refs.contains_key("PEREN_NODE_ID") {
+                problems.push(Problem::new(
+                    format!("services[{index}].secrets_store_refs.PEREN_NODE_ID"),
+                    "is reserved when expose_node_id is enabled",
+                ));
+            }
+            for (name, binding) in &service.bindings {
+                if name == "PEREN_NODE_ID"
+                    && matches!(binding, crate::Binding::SecretsStoreSecret { .. })
+                {
+                    problems.push(Problem::new(
+                        format!("services[{index}].bindings.PEREN_NODE_ID"),
+                        "is reserved when expose_node_id is enabled",
+                    ));
+                }
+            }
+        }
     }
     if config.services.is_empty() {
         problems.push(Problem::new("services", "at least one service is required"));

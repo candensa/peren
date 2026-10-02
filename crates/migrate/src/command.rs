@@ -133,6 +133,7 @@ fn service(migrated: MigratedDeployment) -> Result<Service, Error> {
             .collect(),
         bindings: migrated.bindings.into_iter().collect(),
         vars: migrated.plain_vars.into_iter().collect(),
+        expose_node_id: false,
         secrets: BTreeMap::default(),
         secrets_store_refs: BTreeMap::default(),
         additional_modules: BTreeMap::default(),

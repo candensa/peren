@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use peren_config::{Binding, D1Backend, KvBackend, Service};
+use peren_primitives::NodeId;
 use peren_runtime::WorkerEnvironment;
 
 use crate::{Providers, process::ProcessError};
@@ -168,6 +169,7 @@ fn required_provider_token<'a>(
 }
 
 pub(in crate::process) fn environments(
+    node_id: NodeId,
     services: &[Service],
     dispatch_namespaces: &[peren_config::DispatchNamespace],
     cache: &peren_config::Cache,
@@ -178,6 +180,7 @@ pub(in crate::process) fn environments(
         .iter()
         .map(|service| {
             environment(
+                node_id,
                 service,
                 dispatch_namespaces,
                 cache,
@@ -191,6 +194,7 @@ pub(in crate::process) fn environments(
 
 #[allow(clippy::too_many_lines)]
 pub(in crate::process) fn environment(
+    node_id: NodeId,
     service: &Service,
     dispatch_namespaces: &[peren_config::DispatchNamespace],
     cache: &peren_config::Cache,
@@ -198,6 +202,9 @@ pub(in crate::process) fn environment(
     queue_provider: &serde_json::Value,
 ) -> Result<WorkerEnvironment, ProcessError> {
     let mut values = service.vars.clone();
+    if service.expose_node_id {
+        values.insert("PEREN_NODE_ID".into(), node_id.as_uuid().to_string());
+    }
     let mut bindings = serde_json::Map::new();
     for (name, secret) in &service.secrets {
         let key = secret.lookup_key(name);

@@ -66,6 +66,7 @@ tokio-tungstenite = "0.29"
 toml = "0.8"
 turso = { version = "=0.8.0-pre.14", default-features = false, features = ["sync"] }
 turso_parser = "=0.8.0-pre.14"
+url = "2"
 uuid = { version = "1", features = ["serde", "v4"] }
 wait-timeout = "0.2"
 tempfile = "3"

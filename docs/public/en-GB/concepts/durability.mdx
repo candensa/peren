@@ -22,7 +22,11 @@ Replica objects are immutable. The mutable restore pointer is `cells/<cell>/root
 
 Checkpointing writes a new complete database image, resets the WAL boundary and prunes superseded replica objects. The `limits.checkpoint_threshold_bytes` setting, or a service-level override, triggers a checkpoint when a dispatch publishes at least that many WAL bytes. Set the threshold to `0` to disable threshold-triggered checkpoints.
 
-`peren storage prune` uses the same root reachability rule. It keeps the root snapshot and WAL objects, then removes replica objects that are no longer reachable from the authoritative root.
+`peren storage collect` uses the same root reachability rule. It keeps the root snapshot and WAL objects, then removes replica objects that are no longer reachable from the authoritative root after `limits.replica_retention_secs` has elapsed. `peren storage prune` remains an alias.
+
+Checkpoint and collection decisions are per cell and are derived from the cell's current root manifest. A checkpointed cell can be collected independently from other cells once its obsolete replica objects are outside the configured retention window.
+
+`peren storage erase` is the explicit operator path for permanent cell erasure. It removes the authoritative restore pointer and replica objects for one cell id after a dry run or an explicit `--force`. Use it only when the application no longer needs that cell and you accept that Peren cannot restore its prior state from the fleet bucket.
 
 ## Lifecycle trace points
 

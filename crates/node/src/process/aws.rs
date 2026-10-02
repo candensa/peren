@@ -5,7 +5,7 @@ use peren_runtime::{AwsSigv4Fetch, HostError, HttpRequest, HttpResponse};
 use reqwest::Url;
 use sha2::{Digest, Sha256};
 
-use super::{AwsBinding, AwsCredential};
+use super::{AwsBinding, AwsCredential, host::resolve_worker_egress};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -16,7 +16,6 @@ struct SigningCredential {
 }
 
 pub(super) async fn fetch(
-    client: &reqwest::Client,
     binding: &AwsBinding,
     request: AwsSigv4Fetch,
 ) -> Result<HttpResponse, HostError> {
@@ -28,9 +27,21 @@ pub(super) async fn fetch(
     if !binding.hosts.contains(&host) {
         return Err(HostError);
     }
+    let resolution = resolve_worker_egress(&url).await?;
+    if resolution.forbidden {
+        return Err(HostError);
+    }
     let credential = credential(&binding.credential)?;
     let signed = sign(request.request, &url, &host, binding, &credential)?;
-    send(client, url, signed).await
+    let client = crate::tls::client_with_identity_and_resolution(
+        None,
+        resolution
+            .pinned
+            .as_ref()
+            .map(|pinned| (pinned.host.as_str(), pinned.addresses.as_slice())),
+    )
+    .map_err(|_| HostError)?;
+    send(&client, url, signed).await
 }
 
 fn credential(source: &AwsCredential) -> Result<SigningCredential, HostError> {

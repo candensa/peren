@@ -1,10 +1,18 @@
-use peren_provider_object_store::ReplicaPruneReport;
+use peren_primitives::CellId;
+use peren_provider_object_store::{ReplicaDeleteReport, ReplicaPruneReport};
 use thiserror::Error;
 
 use crate::{Environment, ProviderError, Providers};
 
 #[derive(Debug)]
 pub struct Prune {
+    pub dry_run: bool,
+    pub retention_secs: u64,
+}
+
+#[derive(Debug)]
+pub struct EraseCell {
+    pub cell: CellId,
     pub dry_run: bool,
 }
 
@@ -16,7 +24,20 @@ pub async fn prune_replicas(
     let providers = Providers::build(&config, environment).await?;
     providers
         .repository
-        .prune_replicas(request.dry_run)
+        .prune_replicas(request.dry_run, request.retention_secs)
+        .await
+        .map_err(Error::Replica)
+}
+
+pub async fn erase_cell_replicas(
+    config: peren_config::ValidatedConfig,
+    environment: &impl Environment,
+    request: EraseCell,
+) -> Result<ReplicaDeleteReport, Error> {
+    let providers = Providers::build(&config, environment).await?;
+    providers
+        .repository
+        .delete_cell_replicas(request.cell, request.dry_run)
         .await
         .map_err(Error::Replica)
 }

@@ -34,6 +34,7 @@ mod tests {
             .block_on(Providers::build(&config, &env_state))
             .unwrap();
         let env = binding::environment(
+            peren_primitives::NodeId::from_uuid(config.raw.node.id),
             &config.raw.services[0],
             &config.raw.dispatch_namespaces,
             &config.raw.cache,

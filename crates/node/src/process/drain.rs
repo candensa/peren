@@ -583,6 +583,7 @@ mod tests {
             ],
             bindings: std::collections::BTreeMap::new(),
             vars: std::collections::BTreeMap::new(),
+            expose_node_id: false,
             secrets: std::collections::BTreeMap::new(),
             secrets_store_refs: std::collections::BTreeMap::new(),
             additional_modules: std::collections::BTreeMap::new(),

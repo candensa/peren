@@ -782,12 +782,12 @@ peren uninstall fleet.toml --force
 
 ## Data operations
 
-### `peren storage prune`
+### `peren storage collect`
 
-Prunes obsolete cell replica objects from the configured bucket.
+Collects obsolete cell replica objects from the configured bucket. `peren storage prune` is accepted as an alias.
 
 ```sh
-peren storage prune <config> [--dry-run]
+peren storage collect <config> [--dry-run]
 ```
 
 | Argument | Required | Default | Notes |
@@ -795,16 +795,42 @@ peren storage prune <config> [--dry-run]
 | `<config>` | required | — | Fleet TOML path |
 | `--dry-run` | optional | off | Report reclaimable objects without deleting |
 
-**State.** Scans cells with an authoritative replica root. The command keeps `root.json` and every snapshot, WAL header and WAL segment named by that root. Objects outside the root's restore plan are removed only when `--dry-run` is absent. Memory buckets report zero pruned objects.
+**State.** Scans cells with an authoritative replica root. The command keeps `root.json` and every snapshot, WAL header and WAL segment named by that root. Objects outside the root's restore plan are removed only after `limits.replica_retention_secs` has elapsed and `--dry-run` is absent. Memory buckets report zero collected objects.
 
 **Output.** `would prune <n> replica object(s) across <cells> cell(s) ...` or `pruned <n> replica object(s) ...`
 
 ```sh
-peren storage prune fleet.toml --dry-run
-peren storage prune fleet.toml
+peren storage collect fleet.toml --dry-run
+peren storage collect fleet.toml
 ```
 
 **Failure.** Exits `1` on config, provider, listing, read or delete failure.
+
+### `peren storage erase`
+
+Erases the durable replica state for one cell.
+
+```sh
+peren storage erase <config> --cell <cell-id> [--dry-run] [--force]
+```
+
+| Argument | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<config>` | required | — | Fleet TOML path |
+| `--cell <cell-id>` | required | — | 64-character hexadecimal cell id |
+| `--dry-run` | optional | off | Report matching replica objects without deleting |
+| `--force` | optional | off | Required unless `--dry-run` is set |
+
+**State.** Targets `cells/<cell>/root.json` plus snapshot, WAL header, and WAL segment objects for that cell in the configured bucket. Memory buckets report zero erased objects.
+
+**Output.** `would delete <n> replica object(s) for cell <cell> ...` or `deleted <n> replica object(s) ...`
+
+```sh
+peren storage erase fleet.toml --cell <cell-id> --dry-run
+peren storage erase fleet.toml --cell <cell-id> --force
+```
+
+**Failure.** Exits `1` on config, provider, listing, read or delete failure. Exits `1` when `--force` is omitted on a mutating delete.
 
 ### `peren d1 query`
 

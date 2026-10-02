@@ -69,6 +69,26 @@ async fn public_listener_dispatches_to_worker_runtime() {
 }
 
 #[tokio::test]
+async fn service_can_opt_in_to_stable_node_id_env() {
+    let worker = TestWorker::from_source(
+        "export default { fetch(_request, env) { return new Response(env.PEREN_NODE_ID ?? 'missing'); } };",
+    );
+    let environment = DataEnv::new();
+    let mut config = config::worker(worker.path());
+    config.raw.services[0].expose_node_id = true;
+    let process = Process::start(config, &environment).await.unwrap();
+    let address = process.listeners()["public"];
+
+    let response = get(address, "/").await;
+
+    assert!(
+        response.ends_with("00000000-0000-0000-0000-000000000001"),
+        "{response}"
+    );
+    process.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn public_listener_captures_worker_console_logs_with_severity() {
     let worker = TestWorker::from_source(
         "export default { async fetch() {

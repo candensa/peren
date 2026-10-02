@@ -13,6 +13,8 @@ A Worker can call only hosts you allow. Peren sends those requests from the node
 
 **What Peren does:** global `fetch` and outbound binding `fetch` run in the node process. The request host must appear in the service's outbound host set. That set comes from `type = "outbound"` `allowed_hosts`, plus hosts from configured AI, vector, images, or container bindings. A host outside the set fails before Peren sends the request.
 
+Worker-controlled outbound fetch also refuses loopback, private, link-local, documentation, broadcast and unspecified IP destinations, plus `localhost`, even if one is listed in `allowed_hosts`. Peren applies that refusal to literal IP hosts and to hostnames before dialing when DNS resolves them into a refused range. This keeps Worker code from reaching the peer listener, local operator surfaces, metadata-style addresses, or another fleet's local control port on a shared host.
+
 There is no ambient network from the isolate. Undeclared hosts do not leave the process.
 
 **What you configure:** which hosts appear in each outbound allowlist and which upstreams those hosts reach.
@@ -31,15 +33,15 @@ There is no ambient network from the isolate. Undeclared hosts do not leave the 
 
 **What you can check:** an mTLS binding on `env` is an object with no PEM. A SigV4 binding does not expose access keys. See [Client mTLS](/docs/bindings/mtls/) and [AWS SigV4](/docs/bindings/sigv4/).
 
-## Redirect targets are not re-checked
+## Redirects are not followed
 
-**What it covers:** the host reached after an outbound HTTP redirect.
+**What it covers:** redirected Worker-caused HTTP requests.
 
-**What Peren does:** allowlist membership for the initial request URL host. Redirect targets of outbound fetch are not checked again against `allowed_hosts`.
+**What Peren does:** the node HTTP client does not follow redirects for Worker outbound requests. A `3xx` response is returned to the Worker with its `Location` header. If the Worker chooses to issue a second request to that location, Peren applies the same allowlist and local-address refusal before sending it.
 
-**What you configure:** that allowlisted hosts do not redirect to destinations the fleet must not reach, or that upstreams refuse such redirects.
+**What you configure:** explicit allowed hosts for every destination the Worker may call.
 
-**What you can check:** Peren checks the URL the Worker passed. A redirect can then reach a host that is not in `allowed_hosts`.
+**What you can check:** an upstream redirect to loopback or another unlisted host remains a response, not a node-side follow-up request.
 
 ## Peer listen and `[mtls]`
 

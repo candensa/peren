@@ -3,6 +3,7 @@ use std::{
     num::NonZeroUsize,
 };
 
+use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use object_store::{PutMode, PutOptions, PutPayload, UpdateVersion, path::Path};
 use peren_fleet::OwnershipRepository;
@@ -20,6 +21,20 @@ pub struct ReplicaPruneReport {
     pub objects_retained: usize,
     pub objects_removed: usize,
     pub bytes_removed: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReplicaDeleteReport {
+    pub dry_run: bool,
+    pub cell: CellId,
+    pub objects_removed: usize,
+    pub bytes_removed: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ReplicaObjectMeta {
+    size: u64,
+    last_modified: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -251,13 +266,19 @@ impl BucketStore {
         })
     }
 
-    pub async fn prune_replicas(&self, dry_run: bool) -> Result<ReplicaPruneReport, ReplicaError> {
+    pub async fn prune_replicas(
+        &self,
+        dry_run: bool,
+        retention_secs: u64,
+    ) -> Result<ReplicaPruneReport, ReplicaError> {
         let mut report = ReplicaPruneReport {
             dry_run,
             ..ReplicaPruneReport::default()
         };
         for cell in self.root_cells().await? {
-            let cell_report = self.prune_cell_replicas(cell, dry_run).await?;
+            let cell_report = self
+                .prune_cell_replicas(cell, dry_run, retention_secs)
+                .await?;
             report.cells_scanned += cell_report.cells_scanned;
             report.objects_retained += cell_report.objects_retained;
             report.objects_removed += cell_report.objects_removed;
@@ -268,10 +289,43 @@ impl BucketStore {
         Ok(report)
     }
 
+    pub async fn delete_cell_replicas(
+        &self,
+        cell: CellId,
+        dry_run: bool,
+    ) -> Result<ReplicaDeleteReport, ReplicaError> {
+        let mut candidates = self.replica_objects(cell).await?;
+        let root = root_key(cell);
+        if let Some(size) = self.object_size(&root).await? {
+            candidates.insert(
+                root,
+                ReplicaObjectMeta {
+                    size,
+                    last_modified: Utc::now(),
+                },
+            );
+        }
+        let mut report = ReplicaDeleteReport {
+            dry_run,
+            cell,
+            objects_removed: 0,
+            bytes_removed: 0,
+        };
+        for (key, object) in candidates {
+            report.objects_removed += 1;
+            report.bytes_removed = report.bytes_removed.saturating_add(object.size);
+            if !dry_run {
+                self.delete_replica(&key).await?;
+            }
+        }
+        Ok(report)
+    }
+
     async fn prune_cell_replicas(
         &self,
         cell: CellId,
         dry_run: bool,
+        retention_secs: u64,
     ) -> Result<ReplicaPruneReport, ReplicaError> {
         let Some(root) = self.read_root(cell).await? else {
             return Ok(ReplicaPruneReport {
@@ -286,8 +340,13 @@ impl BucketStore {
             cells_scanned: 1,
             ..ReplicaPruneReport::default()
         };
-        for (key, size) in candidates {
+        let now = Utc::now();
+        for (key, object) in candidates {
             if reachable.contains(&key) || replica_object_is_newer_than_root(cell, &key, &root) {
+                report.objects_retained += 1;
+                continue;
+            }
+            if !replica_object_retention_elapsed(now, object.last_modified, retention_secs) {
                 report.objects_retained += 1;
                 continue;
             }
@@ -304,7 +363,7 @@ impl BucketStore {
                 }
             }
             report.objects_removed += 1;
-            report.bytes_removed = report.bytes_removed.saturating_add(size);
+            report.bytes_removed = report.bytes_removed.saturating_add(object.size);
             if !dry_run {
                 self.delete_replica(&key).await?;
             }
@@ -324,7 +383,10 @@ impl BucketStore {
         Ok(cells)
     }
 
-    async fn replica_objects(&self, cell: CellId) -> Result<BTreeMap<Path, u64>, ReplicaError> {
+    async fn replica_objects(
+        &self,
+        cell: CellId,
+    ) -> Result<BTreeMap<Path, ReplicaObjectMeta>, ReplicaError> {
         let mut objects = BTreeMap::new();
         for prefix in [
             Path::from(format!("cells/{cell}/snapshot")),
@@ -334,11 +396,37 @@ impl BucketStore {
             let mut listed = self.store.list(Some(&prefix));
             while let Some(item) = listed.next().await {
                 let meta = item.map_err(|_| ReplicaError::Unavailable)?;
-                objects.insert(meta.location, u64::try_from(meta.size).unwrap_or(u64::MAX));
+                objects.insert(
+                    meta.location,
+                    ReplicaObjectMeta {
+                        size: u64::try_from(meta.size).unwrap_or(u64::MAX),
+                        last_modified: meta.last_modified,
+                    },
+                );
             }
         }
         Ok(objects)
     }
+
+    async fn object_size(&self, key: &Path) -> Result<Option<u64>, ReplicaError> {
+        match self.store.head(key).await {
+            Ok(meta) => Ok(Some(u64::try_from(meta.size).unwrap_or(u64::MAX))),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(_) => Err(ReplicaError::Unavailable),
+        }
+    }
+}
+
+fn replica_object_retention_elapsed(
+    now: DateTime<Utc>,
+    last_modified: DateTime<Utc>,
+    retention_secs: u64,
+) -> bool {
+    if retention_secs == 0 {
+        return true;
+    }
+    let age = now.signed_duration_since(last_modified);
+    age.num_seconds() >= i64::try_from(retention_secs).unwrap_or(i64::MAX)
 }
 
 impl ReplicaRepository for BucketStore {

@@ -21,4 +21,4 @@ mod ownership;
 pub use ownership::BucketLease;
 
 mod replica;
-pub use replica::ReplicaPruneReport;
+pub use replica::{ReplicaDeleteReport, ReplicaPruneReport};

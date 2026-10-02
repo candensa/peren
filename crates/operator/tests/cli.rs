@@ -152,6 +152,16 @@ fn parses_data_and_workflow_commands() {
             "--file",
             "data.ndjson",
         ],
+        &["peren", "storage", "collect", "fleet.toml", "--dry-run"],
+        &[
+            "peren",
+            "storage",
+            "erase",
+            "fleet.toml",
+            "--cell",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+            "--dry-run",
+        ],
     ] {
         parses(args);
     }

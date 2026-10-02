@@ -21,7 +21,7 @@ This page lists errors you see at the CLI, in config validation, or from a Worke
 | What you see | Cause | Next action |
 | --- | --- | --- |
 | `runtime host operation failed` | A node operation failed: network, signing, or storage | Check the binding, credentials, allowed hosts, and the upstream. Retry after that dependency answers. |
-| `TypeError: outbound host … is not allowed by this binding` | `env.NAME.fetch` targeted a host outside `allowed_hosts` | Add the host to the outbound binding or call a permitted host. Redirect targets are not re-checked. See [Outbound fetch](/docs/bindings/outbound/). |
+| `TypeError: outbound host … is not allowed by this binding` | `env.NAME.fetch` targeted a host outside `allowed_hosts` | Add the host to the outbound binding or call a permitted host. Peren returns redirects to the Worker instead of following them in the host client. See [Outbound fetch](/docs/bindings/outbound/). |
 | `KV compareAndSet is only supported by native KV` | `compareAndSet` on Redis or bucket KV | Use native KV for conditional writes, or use `put` when a conditional write is not required. See [KV](/docs/bindings/kv/). |
 | `TypeError: fetch must return a Response` | The Worker `fetch` handler returned a non-`Response` value | Return a `Response` or a promise that resolves to one. See [Workers](/docs/build/workers/). |
 | `TypeError: Container.<operation> requires a managed sandbox provider; this binding currently supports fetch() through the configured local port` | Container `exec`, `start`, `stop`, `destroy`, `readFile`, `writeFile`, or related control methods | Use `fetch` against the local port only. See [Containers](/docs/bindings/containers/). |
