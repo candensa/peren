@@ -565,9 +565,10 @@ fn socket_app(context: SocketContext<'_>, bundle: WorkerBundle, service: &str) -
         bundle,
         service: Arc::from(service),
         service_scope: Arc::from(
-            service_config
-                .map(peren_config::Service::isolation_scope)
-                .unwrap_or_else(|| format!("service/{service}")),
+            service_config.map_or_else(
+                || format!("service/{service}"),
+                peren_config::Service::isolation_scope,
+            ),
         ),
         limits: context.limits,
         checkpoint_threshold_bytes: context
@@ -823,8 +824,7 @@ fn service_targets(
             let scope = services
                 .iter()
                 .find(|service| service.name == *name)
-                .map(Service::isolation_scope)
-                .unwrap_or_else(|| format!("service/{name}"));
+                .map_or_else(|| format!("service/{name}"), Service::isolation_scope);
             (
                 name.clone(),
                 ServiceTarget {

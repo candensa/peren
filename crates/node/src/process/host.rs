@@ -777,8 +777,10 @@ impl DurableObjectHost for ProcessHost {
             .objects
             .get(&class_name)
             .and_then(|service| self.services.get(service))
-            .map(|target| target.scope.clone())
-            .unwrap_or_else(|| Arc::from(format!("service/{class_name}")));
+            .map_or_else(
+                || Arc::from(format!("service/{class_name}")),
+                |target| target.scope.clone(),
+            );
         let span = self.trace_context.as_ref().map(TraceContext::child);
         let dispatch_context = span.clone();
         let host = self.clone();
