@@ -10,6 +10,8 @@ use crate::{
 };
 
 pub(super) async fn serve(command: cli::Server) -> Result<(), CliError> {
+    let signal = shutdown_signal()?;
+    tokio::pin!(signal);
     let mut inherited = BTreeMap::new();
     let mut descriptors = std::collections::BTreeSet::new();
     for socket in command.socket_fds {
@@ -26,7 +28,7 @@ pub(super) async fn serve(command: cli::Server) -> Result<(), CliError> {
     let config = imported.value;
     let process = start_with_inherited(config, inherited).await?;
     progress.success("Peren is running");
-    shutdown_signal().await?;
+    signal.await?;
     let progress = Progress::start(Style::Line, "Stopping Peren");
     process.shutdown().await?;
     progress.success("Peren stopped");
@@ -62,10 +64,12 @@ async fn start_with_inherited(
 
 pub(super) async fn dev(command: cli::Worker) -> Result<(), CliError> {
     let mut running = start_dev_session(&command).await?;
+    let signal = shutdown_signal()?;
+    tokio::pin!(signal);
     loop {
         let mut reload = tokio::spawn(super::develop::watch_reload(running.watch_paths.clone()));
         tokio::select! {
-            signal = shutdown_signal() => {
+            signal = &mut signal => {
                 signal?;
                 running.abort_tail();
                 reload.abort();
@@ -135,6 +139,8 @@ async fn start_dev_session(command: &cli::Worker) -> Result<RunningDev, CliError
 }
 
 pub(super) async fn test(command: cli::Worker) -> Result<(), CliError> {
+    let signal = shutdown_signal()?;
+    tokio::pin!(signal);
     let session = Session::load(&command)?;
     let topology = session.topology();
     let config = prepare_test_server(session.raw)?;
@@ -144,7 +150,7 @@ pub(super) async fn test(command: cli::Worker) -> Result<(), CliError> {
         serde_json::json!({ "ready": true, "sockets": process.listeners(), "topology": topology })
     );
     std::io::stdout().flush().map_err(CliError::ReadyOutput)?;
-    shutdown_signal().await?;
+    signal.await?;
     process.shutdown().await?;
     Ok(())
 }

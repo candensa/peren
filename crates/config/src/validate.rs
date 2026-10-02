@@ -271,6 +271,18 @@ use limits::{validate_limits, validate_queues_limits, validate_service_limits};
 fn validate_tenants(config: &FleetConfig, problems: &mut Vec<Problem>) {
     let mut tenants = BTreeSet::new();
     for (index, tenant) in config.tenants.iter().enumerate() {
+        if !valid_scope_token(&tenant.id) {
+            problems.push(Problem::new(
+                format!("tenants[{index}].id"),
+                "must contain only ASCII letters, digits, '.', '_', or '-'",
+            ));
+        }
+        if tenant.cell_quota == 0 {
+            problems.push(Problem::new(
+                format!("tenants[{index}].cell_quota"),
+                "must be greater than zero",
+            ));
+        }
         if !tenants.insert(&tenant.id) {
             problems.push(Problem::new(
                 format!("tenants[{index}].id"),
@@ -281,6 +293,12 @@ fn validate_tenants(config: &FleetConfig, problems: &mut Vec<Problem>) {
 
     let mut projects = BTreeMap::new();
     for (index, project) in config.projects.iter().enumerate() {
+        if !valid_scope_token(&project.id) {
+            problems.push(Problem::new(
+                format!("projects[{index}].id"),
+                "must contain only ASCII letters, digits, '.', '_', or '-'",
+            ));
+        }
         if !tenants.contains(&project.tenant_id) {
             problems.push(Problem::new(
                 format!("projects[{index}].tenant_id"),
@@ -334,6 +352,13 @@ fn validate_tenants(config: &FleetConfig, problems: &mut Vec<Problem>) {
             }
         }
     }
+}
+
+fn valid_scope_token(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn validate_namespaces(config: &FleetConfig, problems: &mut Vec<Problem>) {

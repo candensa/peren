@@ -648,7 +648,7 @@ async fn dispatch_service(
     let trace = host.trace.clone();
     let trace_context = parent_context.as_ref().map(TraceContext::child);
     let service_name = fetch.service.clone();
-    let cell_id = cell(&fetch.service, path);
+    let cell_id = cell(&target.scope, path);
     host.node
         .restore_and_dispatch(cell_id, |input| async move {
             let restore_source = match &input.restore.source {
@@ -773,6 +773,14 @@ impl DurableObjectHost for ProcessHost {
         let class_name = fetch.class_name.clone();
         let namespace = fetch.namespace.clone();
         let object_id = fetch.id.clone();
+        let object_scope = self
+            .objects
+            .get(&class_name)
+            .and_then(|service| self.services.get(service))
+            .map_or_else(
+                || Arc::from(class_name.clone()),
+                |target| target.scope.clone(),
+            );
         let span = self.trace_context.as_ref().map(TraceContext::child);
         let dispatch_context = span.clone();
         let host = self.clone();
@@ -794,11 +802,12 @@ impl DurableObjectHost for ProcessHost {
             Ok(response) => {
                 Telemetry::inc(&self.telemetry.object_fetches);
                 if let Some(span) = span.as_ref() {
+                    let cell = object_cell(&object_scope, &namespace, &object_id).to_string();
                     let _ = self.trace.record_span(
                         span,
                         SpanRecord {
                             service: &class_name,
-                            cell: Some(&object_cell(&namespace, &object_id).to_string()),
+                            cell: Some(&cell),
                             name: "durable_object.fetch",
                             kind: SpanKind::Client,
                             started,
@@ -824,11 +833,12 @@ impl DurableObjectHost for ProcessHost {
             Err(error) => {
                 Telemetry::inc(&self.telemetry.object_errors);
                 if let Some(span) = span.as_ref() {
+                    let cell = object_cell(&object_scope, &namespace, &object_id).to_string();
                     let _ = self.trace.record_span(
                         span,
                         SpanRecord {
                             service: &class_name,
-                            cell: Some(&object_cell(&namespace, &object_id).to_string()),
+                            cell: Some(&cell),
                             name: "durable_object.fetch",
                             kind: SpanKind::Client,
                             started,
@@ -879,7 +889,7 @@ async fn dispatch_object(
     let trace = host.trace.clone();
     let trace_context = parent_context.as_ref().map(TraceContext::child);
     let service_name = service.clone();
-    let cell_id = object_cell(&fetch.namespace, &fetch.id);
+    let cell_id = object_cell(&target.scope, &fetch.namespace, &fetch.id);
     host.node
         .restore_and_dispatch(cell_id, |input| async move {
             let restore_source = match &input.restore.source {
@@ -1174,9 +1184,18 @@ impl DurableStorageHost for ProcessHost {
     }
 }
 
-pub(crate) fn object_cell(namespace: &str, id: &str) -> CellId {
+pub(crate) fn object_cell(service_scope: &str, namespace: &str, id: &str) -> CellId {
     let mut digest = Sha256::new();
-    digest.update(b"peren-do-v1\0");
+    if !service_scope.contains('/') {
+        digest.update(b"peren-do-v1\0");
+        digest.update(namespace.as_bytes());
+        digest.update([0]);
+        digest.update(id.as_bytes());
+        return CellId::from_bytes(digest.finalize().into());
+    }
+    digest.update(b"peren-do-v2\0");
+    digest.update(service_scope.as_bytes());
+    digest.update([0]);
     digest.update(namespace.as_bytes());
     digest.update([0]);
     digest.update(id.as_bytes());
@@ -1202,7 +1221,7 @@ pub(super) fn cell(service: &str, path: &str) -> CellId {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    use super::{forbidden_worker_ip, is_forbidden_worker_egress};
+    use super::{cell, forbidden_worker_ip, is_forbidden_worker_egress, object_cell};
 
     #[test]
     fn worker_egress_rejects_reserved_ipv4_and_embedded_ipv6() {
@@ -1235,5 +1254,25 @@ mod tests {
         let url = reqwest::Url::parse("https://[::1]/metadata").unwrap();
 
         assert!(is_forbidden_worker_egress(&url));
+    }
+
+    #[test]
+    fn cell_ids_include_service_isolation_scope() {
+        assert_ne!(
+            cell("tenant/acme/project/web/service/api", "/room"),
+            cell("tenant/other/project/web/service/api", "/room")
+        );
+        assert_ne!(
+            object_cell("tenant/acme/project/web/service/api", "COUNTER", "id-1"),
+            object_cell("tenant/other/project/web/service/api", "COUNTER", "id-1")
+        );
+        assert_eq!(
+            object_cell("api", "COUNTER", "id-1"),
+            object_cell("worker", "COUNTER", "id-1")
+        );
+        assert_ne!(
+            object_cell("api", "COUNTER", "id-1"),
+            object_cell("tenant/acme/project/web/service/api", "COUNTER", "id-1")
+        );
     }
 }

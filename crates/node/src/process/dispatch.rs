@@ -529,7 +529,7 @@ pub(crate) async fn dispatch_worker(
     let request = request(method_name.clone(), &path, &headers, &body)?;
     let dispatch = Dispatch {
         request,
-        cell: cell(&app.service, uri.path()),
+        cell: cell(&app.service_scope, uri.path()),
         isolate: IsolateLimits::new(app.limits.heap, app.limits.execution),
         invocation: InvocationLimits::new(app.limits.body, app.limits.subrequests),
         host: uses_host(&app),

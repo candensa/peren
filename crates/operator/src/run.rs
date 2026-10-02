@@ -231,16 +231,18 @@ fn emit_notices(notices: Vec<peren_migrate::Notice>) {
 }
 
 #[cfg(unix)]
-async fn shutdown_signal() -> Result<(), CliError> {
+fn shutdown_signal() -> Result<impl std::future::Future<Output = Result<(), CliError>>, CliError> {
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .map_err(CliError::Signal)?;
-    tokio::select! {
-        result = tokio::signal::ctrl_c() => result.map_err(CliError::Signal),
-        _ = terminate.recv() => Ok(()),
-    }
+    Ok(async move {
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result.map_err(CliError::Signal),
+            _ = terminate.recv() => Ok(()),
+        }
+    })
 }
 
 #[cfg(not(unix))]
-async fn shutdown_signal() -> Result<(), CliError> {
-    tokio::signal::ctrl_c().await.map_err(CliError::Signal)
+fn shutdown_signal() -> Result<impl std::future::Future<Output = Result<(), CliError>>, CliError> {
+    Ok(async { tokio::signal::ctrl_c().await.map_err(CliError::Signal) })
 }

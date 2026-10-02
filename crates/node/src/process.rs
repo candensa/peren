@@ -62,6 +62,7 @@ pub(super) struct SocketApp {
     pub(super) node: Node<Repository>,
     pub(super) bundle: WorkerBundle,
     pub(super) service: Arc<str>,
+    pub(super) service_scope: Arc<str>,
     pub(super) limits: Limits,
     pub(super) checkpoint_threshold_bytes: u64,
     tail: PathBuf,
@@ -90,6 +91,7 @@ pub(super) struct SocketApp {
 #[derive(Clone)]
 pub(super) struct ServiceTarget {
     pub(super) bundle: WorkerBundle,
+    pub(super) scope: Arc<str>,
     pub(super) environment: WorkerEnvironment,
     pub(super) checkpoint_threshold_bytes: u64,
     d1: BTreeMap<String, D1Route>,
@@ -143,6 +145,7 @@ struct SocketContext<'a> {
     repository: Repository,
     limits: Limits,
     checkpoint_thresholds: &'a BTreeMap<String, u64>,
+    services_config: &'a [Service],
     sampling_ratio: f64,
     environments: &'a BTreeMap<String, WorkerEnvironment>,
     d1: &'a BTreeMap<String, BTreeMap<String, D1Route>>,
@@ -306,7 +309,11 @@ impl Process {
             Arc::clone(&telemetry),
             admission.clone(),
         )?;
-        let services = Arc::new(service_targets(&bundles, &context));
+        let services = Arc::new(service_targets(
+            &bundles,
+            &control_config.raw.services,
+            &context,
+        ));
         let objects = Arc::new(durable_services(&control_config.raw.services));
         let registry = Arc::new(StdMutex::new(BTreeMap::new()));
 
@@ -386,6 +393,7 @@ impl Process {
                             data: &data,
                             repository: context.repository.clone(),
                             limits: context.limits,
+                            services_config: &control_config.raw.services,
                             sampling_ratio: control_config.raw.tracing.sampling_ratio,
                             environments: &context.environments,
                             d1: &context.d1,
@@ -555,10 +563,18 @@ fn process_context(
 }
 
 fn socket_app(context: SocketContext<'_>, bundle: WorkerBundle, service: &str) -> SocketApp {
+    let service_config = context
+        .services_config
+        .iter()
+        .find(|configured| configured.name == service);
     SocketApp {
         node: Node::new(context.node, context.data.join("cells"), context.repository),
         bundle,
         service: Arc::from(service),
+        service_scope: Arc::from(service_config.map_or_else(
+            || service.to_string(),
+            peren_config::Service::isolation_scope,
+        )),
         limits: context.limits,
         checkpoint_threshold_bytes: context
             .checkpoint_thresholds
@@ -833,15 +849,21 @@ fn url_host(url: &str) -> Option<String> {
 
 fn service_targets(
     bundles: &BTreeMap<String, WorkerBundle>,
+    services: &[Service],
     context: &ProcessContext,
 ) -> BTreeMap<String, ServiceTarget> {
     bundles
         .iter()
         .map(|(name, bundle)| {
+            let scope = services
+                .iter()
+                .find(|service| service.name == *name)
+                .map_or_else(|| name.clone(), Service::isolation_scope);
             (
                 name.clone(),
                 ServiceTarget {
                     bundle: bundle.clone(),
+                    scope: Arc::from(scope),
                     environment: context
                         .environments
                         .get(name)

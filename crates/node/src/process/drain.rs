@@ -295,7 +295,7 @@ async fn queue_tick_inner(
         return Ok(());
     };
     let started = Instant::now();
-    let queue_cell = cell(&service, &format!("/__queue/{}", plan.queue));
+    let queue_cell = cell(&target.scope, &format!("/__queue/{}", plan.queue));
     let dispatch = match dispatch_queue_with_host(
         node,
         queues.clone(),
