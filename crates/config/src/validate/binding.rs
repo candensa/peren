@@ -211,16 +211,8 @@ fn validate_aws_sigv4(
         credential_source,
         crate::CredentialsSource::Configured | crate::CredentialsSource::Environment
     ) {
-        super::required(
-            access_key_env,
-            &format!("{field}.access_key_env"),
-            problems,
-        );
-        super::required(
-            secret_key_env,
-            &format!("{field}.secret_key_env"),
-            problems,
-        );
+        super::required(access_key_env, &format!("{field}.access_key_env"), problems);
+        super::required(secret_key_env, &format!("{field}.secret_key_env"), problems);
         if access_key_env == secret_key_env {
             problems.push(Problem::new(
                 format!("{field}.secret_key_env"),
