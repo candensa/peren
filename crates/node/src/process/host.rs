@@ -1186,6 +1186,13 @@ impl DurableStorageHost for ProcessHost {
 
 pub(crate) fn object_cell(service_scope: &str, namespace: &str, id: &str) -> CellId {
     let mut digest = Sha256::new();
+    if !service_scope.contains('/') {
+        digest.update(b"peren-do-v1\0");
+        digest.update(namespace.as_bytes());
+        digest.update([0]);
+        digest.update(id.as_bytes());
+        return CellId::from_bytes(digest.finalize().into());
+    }
     digest.update(b"peren-do-v2\0");
     digest.update(service_scope.as_bytes());
     digest.update([0]);
@@ -1258,6 +1265,14 @@ mod tests {
         assert_ne!(
             object_cell("tenant/acme/project/web/service/api", "COUNTER", "id-1"),
             object_cell("tenant/other/project/web/service/api", "COUNTER", "id-1")
+        );
+        assert_eq!(
+            object_cell("api", "COUNTER", "id-1"),
+            object_cell("worker", "COUNTER", "id-1")
+        );
+        assert_ne!(
+            object_cell("api", "COUNTER", "id-1"),
+            object_cell("tenant/acme/project/web/service/api", "COUNTER", "id-1")
         );
     }
 }
