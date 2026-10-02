@@ -213,13 +213,19 @@ fn validate_aws_sigv4(
     ) {
         super::required(access_key_env, &format!("{field}.access_key_env"), problems);
         super::required(secret_key_env, &format!("{field}.secret_key_env"), problems);
-        if access_key_env == secret_key_env {
+        if access_key_env
+            .zip(secret_key_env)
+            .is_some_and(|(access_key_env, secret_key_env)| access_key_env == secret_key_env)
+        {
             problems.push(Problem::new(
                 format!("{field}.secret_key_env"),
                 "must reference a different environment variable than access_key_env",
             ));
         }
-        if token_env == access_key_env || token_env == secret_key_env {
+        if token_env.is_some_and(|token_env| {
+            access_key_env.is_some_and(|access_key_env| token_env == access_key_env)
+                || secret_key_env.is_some_and(|secret_key_env| token_env == secret_key_env)
+        }) {
             problems.push(Problem::new(
                 format!("{field}.token_env"),
                 "must reference a distinct environment variable",
