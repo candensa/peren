@@ -56,17 +56,19 @@ Required table. Fleet durable object store used for ownership and recovery recor
 | `bucket.bucket` | string | for `s3` and `azure_blob` | unset | bucket or container name | S3 / Azure client | missing for those kinds fails validation |
 | `bucket.region` | string | no | `us-east-1` at S3 client build when unset | AWS-style region | S3 client | wrong region causes client or CAS probe failure at startup |
 | `bucket.access_key_env` | env var name | for `s3` when credentials are configured or environment | unset | name of env var holding access key | S3 static credentials | missing when required fails validation; missing env value fails before listeners open |
-| `bucket.secret_key_env` | env var name | same as `access_key_env` | unset | name of env var holding secret key | S3 static credentials | same as `access_key_env` |
-| `bucket.credentials_source` | enum | no | `configured` | `configured`, `environment`, `instance_role`, `workload_identity`, `eks_pod_identity` | S3 credential selection | `configured` / `environment` without key env names fails validation |
+| `bucket.secret_key_env` | env var name | same as `access_key_env` | unset | name of env var holding secret key | S3 static credentials | missing when required, or same as `access_key_env`, fails validation |
+| `bucket.credentials_source` | enum | no | `configured` | `configured`, `environment`, `instance_role`, `workload_identity`, `eks_pod_identity` | S3 credential selection | `configured` / `environment` without key env names fails validation; Azure Blob accepts only configured environment credentials |
 | `bucket.allow_http` | bool | no | `false` | `true`, `false` | S3 client | `false` against an `http://` endpoint fails at client build or probe |
 | `bucket.azure_account_env` | env var name | for `azure_blob` | unset | account env var | Azure client | missing fails validation |
-| `bucket.azure_access_key_env` | env var name | for `azure_blob` | unset | access-key env var | Azure client | missing fails validation |
+| `bucket.azure_access_key_env` | env var name | for `azure_blob` | unset | access-key env var | Azure client | missing, or same as `azure_account_env`, fails validation |
 | `bucket.azure_emulator` | bool | no | `false` | `true`, `false` | Azure client | wrong setting fails connectivity at startup probe |
 
 For `kind = "s3"`:
 
 - `configured` and `environment` read `access_key_env` and `secret_key_env` from the process environment and build a static-key S3 client.
 - `instance_role`, `workload_identity`, and `eks_pod_identity` call the bucket client's instance-role builder (`AmazonS3Builder` without static keys). That path uses the object-store default credential chain for the host.
+
+For `kind = "azure_blob"`, Peren requires `configured` or `environment` credentials with distinct `azure_account_env` and `azure_access_key_env` names.
 
 This bucket field is not the Worker AWS SigV4 binding. SigV4 `credential_source` values `instance_role`, `workload_identity`, and `eks_pod_identity` read `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` from the process environment and do not call IMDS. See [AWS SigV4](/docs/bindings/sigv4/).
 
@@ -420,7 +422,7 @@ Worker calls `env.NAME.fetch`. A host outside the list throws `TypeError`. Local
 | `allowed_hosts` | string array | yes | at least one host |
 | `access_key_env` | env var name | for `configured` / `environment` | unset |
 | `secret_key_env` | env var name | for `configured` / `environment` | unset |
-| `token_env` | env var name | no | unset |
+| `token_env` | env var name | no | unset; must be distinct from static key env vars when set |
 
 `configured` and `environment` use the named env vars. `instance_role`, `workload_identity`, and `eks_pod_identity` read `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and optional `AWS_SESSION_TOKEN` at request time. They do not call IMDS. See [AWS SigV4](/docs/bindings/sigv4/).
 

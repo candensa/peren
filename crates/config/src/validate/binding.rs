@@ -129,9 +129,13 @@ fn validate(
             super::provider::ai(provider, &field, problems);
         }
         crate::Binding::AwsSigv4 {
+            credential_source,
             allowed_hosts,
             region,
             service,
+            access_key_env,
+            secret_key_env,
+            token_env,
             ..
         } => {
             if allowed_hosts.is_empty() {
@@ -148,6 +152,33 @@ fn validate(
                     format!("{field}.service"),
                     "must not be empty",
                 ));
+            }
+            if matches!(
+                credential_source,
+                crate::CredentialsSource::Configured | crate::CredentialsSource::Environment
+            ) {
+                super::required(
+                    access_key_env.as_ref(),
+                    &format!("{field}.access_key_env"),
+                    problems,
+                );
+                super::required(
+                    secret_key_env.as_ref(),
+                    &format!("{field}.secret_key_env"),
+                    problems,
+                );
+                if access_key_env == secret_key_env {
+                    problems.push(Problem::new(
+                        format!("{field}.secret_key_env"),
+                        "must reference a different environment variable than access_key_env",
+                    ));
+                }
+                if token_env == access_key_env || token_env == secret_key_env {
+                    problems.push(Problem::new(
+                        format!("{field}.token_env"),
+                        "must reference a distinct environment variable",
+                    ));
+                }
             }
         }
         crate::Binding::Hyperdrive {

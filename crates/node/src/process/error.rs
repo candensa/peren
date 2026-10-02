@@ -41,6 +41,11 @@ pub enum ProcessError {
     SecretStore(String),
     #[error("R2 bucket {bucket:?} requires {field}")]
     MissingR2Credential { bucket: String, field: &'static str },
+    #[error("AWS SigV4 binding {binding:?} requires {field}")]
+    MissingAwsCredential {
+        binding: String,
+        field: &'static str,
+    },
     #[error("queue broker {0:?} is missing required configuration or is unavailable")]
     QueueBroker(QueueBroker),
     #[error(transparent)]

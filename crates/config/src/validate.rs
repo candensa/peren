@@ -219,9 +219,28 @@ fn validate_bucket(config: &FleetConfig, problems: &mut Vec<Problem>) {
                     problems,
                 );
             }
+            if matches!(
+                config.bucket.credentials_source,
+                crate::CredentialsSource::Configured | crate::CredentialsSource::Environment
+            ) && config.bucket.access_key_env == config.bucket.secret_key_env
+            {
+                problems.push(Problem::new(
+                    "bucket.secret_key_env",
+                    "must reference a different environment variable than bucket.access_key_env",
+                ));
+            }
         }
         BucketKind::AzureBlob => {
             required(config.bucket.name.as_ref(), "bucket.bucket", problems);
+            if !matches!(
+                config.bucket.credentials_source,
+                crate::CredentialsSource::Configured | crate::CredentialsSource::Environment
+            ) {
+                problems.push(Problem::new(
+                    "bucket.credentials_source",
+                    "Azure Blob buckets require configured environment credentials",
+                ));
+            }
             required(
                 config.bucket.azure_account_env.as_ref(),
                 "bucket.azure_account_env",
@@ -232,6 +251,12 @@ fn validate_bucket(config: &FleetConfig, problems: &mut Vec<Problem>) {
                 "bucket.azure_access_key_env",
                 problems,
             );
+            if config.bucket.azure_account_env == config.bucket.azure_access_key_env {
+                problems.push(Problem::new(
+                    "bucket.azure_access_key_env",
+                    "must reference a different environment variable than bucket.azure_account_env",
+                ));
+            }
         }
         BucketKind::Memory => {}
     }

@@ -530,7 +530,7 @@ fn process_context(
         r2_notifications: r2_notifications(&config.raw.services),
         kv: kv_routes(&config.raw.services, providers)?,
         outbound_hosts: outbound_hosts(&config.raw.services),
-        aws: aws_bindings(&config.raw.services, providers),
+        aws: aws_bindings(&config.raw.services, providers)?,
         mtls: mtls_bindings(&config.raw.services, providers),
         queues: queue_broker(config, data)?,
         cache: cache_store(config, providers, data)?,
@@ -707,23 +707,30 @@ fn mtls_binding(
 fn aws_bindings(
     services: &[Service],
     providers: &Providers,
-) -> BTreeMap<String, Arc<BTreeMap<String, AwsBinding>>> {
+) -> Result<BTreeMap<String, Arc<BTreeMap<String, AwsBinding>>>, ProcessError> {
     services
         .iter()
         .map(|service| {
             let bindings = service
                 .bindings
                 .iter()
-                .filter_map(|(name, binding)| {
-                    aws_binding(binding, providers).map(|route| (name.clone(), route))
+                .filter_map(|(name, binding)| match binding {
+                    peren_config::Binding::AwsSigv4 { .. } => Some(
+                        aws_binding(name, binding, providers).map(|route| (name.clone(), route)),
+                    ),
+                    _ => None,
                 })
-                .collect();
-            (service.name.clone(), Arc::new(bindings))
+                .collect::<Result<BTreeMap<_, _>, ProcessError>>()?;
+            Ok((service.name.clone(), Arc::new(bindings)))
         })
         .collect()
 }
 
-fn aws_binding(binding: &peren_config::Binding, providers: &Providers) -> Option<AwsBinding> {
+fn aws_binding(
+    name: &str,
+    binding: &peren_config::Binding,
+    providers: &Providers,
+) -> Result<AwsBinding, ProcessError> {
     let peren_config::Binding::AwsSigv4 {
         credential_source,
         region,
@@ -734,28 +741,50 @@ fn aws_binding(binding: &peren_config::Binding, providers: &Providers) -> Option
         token_env,
     } = binding
     else {
-        return None;
+        unreachable!("aws_binding only accepts AWS SigV4 bindings");
     };
-    let credential = match credential_source {
-        peren_config::CredentialsSource::Configured
-        | peren_config::CredentialsSource::Environment => {
-            let access = providers.resolved(access_key_env.as_deref()?)?;
-            let secret = providers.resolved(secret_key_env.as_deref()?)?;
-            let token = token_env
-                .as_deref()
-                .and_then(|name| providers.resolved(name))
-                .map(Arc::from);
-            AwsCredential::Static {
-                access: Arc::from(access),
-                secret: Arc::from(secret),
-                token,
+    let credential =
+        match credential_source {
+            peren_config::CredentialsSource::Configured
+            | peren_config::CredentialsSource::Environment => {
+                let access_key_env = access_key_env.as_deref().ok_or_else(|| {
+                    ProcessError::MissingAwsCredential {
+                        binding: name.to_string(),
+                        field: "access_key_env",
+                    }
+                })?;
+                let secret_key_env = secret_key_env.as_deref().ok_or_else(|| {
+                    ProcessError::MissingAwsCredential {
+                        binding: name.to_string(),
+                        field: "secret_key_env",
+                    }
+                })?;
+                let access = providers
+                    .resolved(access_key_env)
+                    .ok_or_else(|| ProcessError::SecretVariable(access_key_env.to_string()))?;
+                let secret = providers
+                    .resolved(secret_key_env)
+                    .ok_or_else(|| ProcessError::SecretVariable(secret_key_env.to_string()))?;
+                let token = token_env
+                    .as_deref()
+                    .map(|name| {
+                        providers
+                            .resolved(name)
+                            .map(Arc::from)
+                            .ok_or_else(|| ProcessError::SecretVariable(name.to_string()))
+                    })
+                    .transpose()?;
+                AwsCredential::Static {
+                    access: Arc::from(access),
+                    secret: Arc::from(secret),
+                    token,
+                }
             }
-        }
-        peren_config::CredentialsSource::InstanceRole
-        | peren_config::CredentialsSource::WorkloadIdentity
-        | peren_config::CredentialsSource::EksPodIdentity => AwsCredential::DefaultChain,
-    };
-    Some(AwsBinding {
+            peren_config::CredentialsSource::InstanceRole
+            | peren_config::CredentialsSource::WorkloadIdentity
+            | peren_config::CredentialsSource::EksPodIdentity => AwsCredential::DefaultChain,
+        };
+    Ok(AwsBinding {
         credential,
         region: region.clone(),
         service: service.clone(),

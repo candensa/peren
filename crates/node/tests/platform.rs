@@ -454,3 +454,38 @@ async fn public_listener_blocks_loopback_aws_binding_fetch() {
     );
     process.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn aws_sigv4_static_binding_requires_credentials_at_startup() {
+    let worker =
+        TestWorker::from_source("export default { fetch() { return new Response('ok'); } };");
+    let environment = DataEnv::new().with("AWS_ACCESS_KEY_ID", "test-access");
+    let mut config = config::worker(worker.path());
+    config.raw.services[0].bindings.insert(
+        "AWS".into(),
+        Binding::AwsSigv4 {
+            credential_source: peren_config::CredentialsSource::Environment,
+            region: "us-east-1".into(),
+            service: "bedrock".into(),
+            allowed_hosts: vec!["bedrock-runtime.us-east-1.amazonaws.com".into()],
+            access_key_env: Some("AWS_ACCESS_KEY_ID".into()),
+            secret_key_env: None,
+            token_env: None,
+        },
+    );
+
+    let error = match Process::start(config, &environment).await {
+        Ok(process) => {
+            process.shutdown().await.unwrap();
+            panic!("process started without AWS SigV4 credentials");
+        }
+        Err(error) => error,
+    };
+
+    assert!(
+        error
+            .to_string()
+            .contains(r#"AWS SigV4 binding "AWS" requires secret_key_env"#),
+        "{error}"
+    );
+}
