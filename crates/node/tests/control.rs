@@ -10,6 +10,10 @@ use peren_testkit::{
     worker::TestWorker,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 
 const NODE: &str = "00000000-0000-0000-0000-000000000001";
 
@@ -34,6 +38,9 @@ async fn peer_control_api_certifies_drain_state_before_storage_removal() {
     let before = json_body(&before);
     assert_eq!(before["admission"], "serving");
     assert_eq!(before["ready"], true);
+    assert_eq!(before["placement_weight"], 100);
+    assert_eq!(before["websocket_resident"], 0);
+    assert_eq!(before["placement_pressure"], 0);
     assert_eq!(before["disk_removal_safe"], false);
     assert!(
         before["incarnation"]
@@ -56,6 +63,8 @@ async fn peer_control_api_certifies_drain_state_before_storage_removal() {
     assert_eq!(drained["admission"], "draining");
     assert_eq!(drained["ready"], false);
     assert_eq!(drained["active"], 0);
+    assert_eq!(drained["websocket_resident"], 0);
+    assert_eq!(drained["placement_pressure"], u64::MAX);
     assert_eq!(drained["disk_removal_safe"], true);
     assert_eq!(drained["retired"], false);
     assert_eq!(drained["incarnation"], before["incarnation"]);
@@ -116,6 +125,56 @@ async fn peer_control_mutations_reject_replay_and_tampering() {
     )
     .await;
     assert!(tampered.starts_with("HTTP/1.1 401"), "{tampered}");
+
+    process.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn drain_reports_websocket_residency_and_blocks_retirement_until_close() {
+    let worker = TestWorker::from_source(
+        "export default { async fetch() {
+                const pair = new WebSocketPair();
+                pair[1].accept();
+                const response = new Response(null);
+                response.webSocket = pair[0];
+                return response;
+            } };",
+    );
+    let environment = DataEnv::new();
+    let mut config = config::worker(worker.path());
+    config.raw.rebalance.placement_weight = Some(200);
+    let process = Process::start(config, &environment).await.unwrap();
+    let public = process.listeners()["public"];
+    let peer = process.listeners()["peer"];
+
+    let mut websocket = open_websocket(public, "/chat").await;
+
+    let before = get(peer, "/control/v1/node").await;
+    assert!(before.starts_with("HTTP/1.1 200"), "{before}");
+    let before = json_body(&before);
+    assert_eq!(before["placement_weight"], 200);
+    assert_eq!(before["websocket_resident"], 1);
+    assert_eq!(before["placement_pressure"], 25);
+    assert_eq!(before["disk_removal_safe"], false);
+
+    let drained = post(peer, "/control/v1/node/drain", "").await;
+    assert!(drained.starts_with("HTTP/1.1 200"), "{drained}");
+    let drained = json_body(&drained);
+    assert_eq!(drained["admission"], "draining");
+    assert_eq!(drained["ready"], false);
+    assert_eq!(drained["websocket_resident"], 1);
+    assert_eq!(drained["disk_removal_safe"], false);
+
+    let retired = post(peer, "/control/v1/node/retire", "").await;
+    assert!(retired.starts_with("HTTP/1.1 409"), "{retired}");
+    let retired = json_body(&retired);
+    assert_eq!(retired["retired"], false);
+    assert_eq!(retired["disk_removal_safe"], false);
+
+    let refused = get(public, "/after-drain").await;
+    assert!(refused.starts_with("HTTP/1.1 503"), "{refused}");
+
+    websocket.shutdown().await.unwrap();
 
     process.shutdown().await.unwrap();
 }
@@ -187,6 +246,19 @@ async fn post(address: std::net::SocketAddr, path: &str, body: &str) -> String {
         ),
     )
     .await
+}
+
+async fn open_websocket(address: std::net::SocketAddr, path: &str) -> TcpStream {
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nhost: localhost\r\nconnection: keep-alive, Upgrade\r\nupgrade: websocket\r\nsec-websocket-version: 13\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = [0; 12];
+    stream.read_exact(&mut response).await.unwrap();
+    let response = String::from_utf8_lossy(&response);
+    assert!(response.starts_with("HTTP/1.1 101"), "{response}");
+    stream
 }
 
 async fn signed_post(

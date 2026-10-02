@@ -31,6 +31,13 @@ An operator may scrape `/metrics` with Prometheus.
 | `peren_admission_completed_total` | counter | Top-level work completed by this node. |
 | `peren_admission_refused_total` | counter | Top-level work refused because the node was saturated. |
 
+## Placement
+
+| Series | Type | Meaning |
+| --- | --- | --- |
+| `peren_placement_weight` | gauge | Configured placement weight for this node. |
+| `peren_placement_available` | gauge | Whether this listener is serving and eligible for new placement. |
+
 ## HTTP
 
 | Series | Type | Meaning |
