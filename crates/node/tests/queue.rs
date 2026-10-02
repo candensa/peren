@@ -55,6 +55,8 @@ async fn public_listener_drains_queue_consumers() {
             queue_name: "memory-jobs".into(),
         },
     );
+    config.raw.services[0].tenant_id = Some("acme".into());
+    config.raw.services[0].project_id = Some("checkout".into());
     config.raw.services[0].consumes_queues = vec![QueueConsumer::Name("memory-jobs".into())];
     let tail_config = config::worker(worker.path());
     let process = Process::start(config, &environment).await.unwrap();
