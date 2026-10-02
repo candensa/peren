@@ -304,11 +304,16 @@ export interface DurableObjectId {
 
 export interface DurableObjectStub extends Fetcher {}
 
+export interface DurableObjectGetOptions {
+  props?: Record<string, unknown>;
+  startupProps?: Record<string, unknown>;
+}
+
 export interface DurableObjectNamespace {
   idFromName(name: string): DurableObjectId;
   idFromString(id: string): DurableObjectId;
   newUniqueId(): DurableObjectId;
-  get(id: DurableObjectId): DurableObjectStub;
+  get(id: DurableObjectId, options?: DurableObjectGetOptions): DurableObjectStub;
 }
 
 export interface ServiceBinding extends Fetcher {}

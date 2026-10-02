@@ -90,8 +90,13 @@ async fn activate_with_post_publish_fence(
     path: &Path,
     bundle: WorkerBundle,
     checks: Arc<AtomicUsize>,
-) -> WorkerCell<Lease, Repository> {
-    WorkerCell::activate(
+) -> (
+    WorkerCell<Lease, Repository>,
+    Arc<Mutex<Option<ReplicaImage>>>,
+) {
+    let repository = repository(false);
+    let image = Arc::clone(&repository.image);
+    let cell = WorkerCell::activate(
         path,
         Lease {
             cell: CellId::from_bytes([1; 32]),
@@ -100,18 +105,24 @@ async fn activate_with_post_publish_fence(
             fail_at: 3,
             releases: None,
         },
-        repository(false),
+        repository,
         bundle,
         isolate(),
         WorkerEnvironment::empty(),
     )
     .await
-    .unwrap()
+    .unwrap();
+    (cell, image)
 }
 
-fn assert_post_publish_fence(checks: &AtomicUsize, state: CellState) {
+fn assert_post_publish_fence(
+    checks: &AtomicUsize,
+    state: CellState,
+    image: &Arc<Mutex<Option<ReplicaImage>>>,
+) {
     assert_eq!(checks.load(Ordering::SeqCst), 3);
     assert_eq!(state, CellState::Fenced);
+    assert!(image.lock().unwrap().is_some());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -119,7 +130,7 @@ async fn background_events_reject_completion_when_ownership_fails_after_publicat
     let directory = tempfile::tempdir().unwrap();
 
     let alarm_checks = Arc::new(AtomicUsize::new(0));
-    let mut alarm = activate_with_post_publish_fence(
+    let (mut alarm, alarm_image) = activate_with_post_publish_fence(
         &directory.path().join("alarm.sqlite"),
         alarm_bundle(),
         Arc::clone(&alarm_checks),
@@ -129,10 +140,10 @@ async fn background_events_reject_completion_when_ownership_fails_after_publicat
         alarm.dispatch_alarm().await,
         Err(CellError::Lease(_))
     ));
-    assert_post_publish_fence(&alarm_checks, alarm.state());
+    assert_post_publish_fence(&alarm_checks, alarm.state(), &alarm_image);
 
     let scheduled_checks = Arc::new(AtomicUsize::new(0));
-    let mut scheduled = activate_with_post_publish_fence(
+    let (mut scheduled, scheduled_image) = activate_with_post_publish_fence(
         &directory.path().join("scheduled.sqlite"),
         scheduled_bundle(),
         Arc::clone(&scheduled_checks),
@@ -147,10 +158,10 @@ async fn background_events_reject_completion_when_ownership_fails_after_publicat
             .await,
         Err(CellError::Lease(_))
     ));
-    assert_post_publish_fence(&scheduled_checks, scheduled.state());
+    assert_post_publish_fence(&scheduled_checks, scheduled.state(), &scheduled_image);
 
     let queue_checks = Arc::new(AtomicUsize::new(0));
-    let mut queue = activate_with_post_publish_fence(
+    let (mut queue, queue_image) = activate_with_post_publish_fence(
         &directory.path().join("queue.sqlite"),
         queue_bundle(),
         Arc::clone(&queue_checks),
@@ -171,10 +182,10 @@ async fn background_events_reject_completion_when_ownership_fails_after_publicat
             .await,
         Err(CellError::Lease(_))
     ));
-    assert_post_publish_fence(&queue_checks, queue.state());
+    assert_post_publish_fence(&queue_checks, queue.state(), &queue_image);
 
     let tail_checks = Arc::new(AtomicUsize::new(0));
-    let mut tail = activate_with_post_publish_fence(
+    let (mut tail, tail_image) = activate_with_post_publish_fence(
         &directory.path().join("tail.sqlite"),
         tail_bundle(),
         Arc::clone(&tail_checks),
@@ -191,10 +202,10 @@ async fn background_events_reject_completion_when_ownership_fails_after_publicat
         .await,
         Err(CellError::Lease(_))
     ));
-    assert_post_publish_fence(&tail_checks, tail.state());
+    assert_post_publish_fence(&tail_checks, tail.state(), &tail_image);
 
     let workflow_checks = Arc::new(AtomicUsize::new(0));
-    let mut workflow = activate_with_post_publish_fence(
+    let (mut workflow, workflow_image) = activate_with_post_publish_fence(
         &directory.path().join("workflow.sqlite"),
         workflow_bundle(),
         Arc::clone(&workflow_checks),
@@ -209,7 +220,7 @@ async fn background_events_reject_completion_when_ownership_fails_after_publicat
             .await,
         Err(CellError::Lease(_))
     ));
-    assert_post_publish_fence(&workflow_checks, workflow.state());
+    assert_post_publish_fence(&workflow_checks, workflow.state(), &workflow_image);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -217,7 +228,7 @@ async fn websocket_events_reject_completion_when_ownership_fails_after_publicati
     let directory = tempfile::tempdir().unwrap();
 
     let websocket_message_checks = Arc::new(AtomicUsize::new(0));
-    let mut websocket_message = activate_with_post_publish_fence(
+    let (mut websocket_message, websocket_message_image) = activate_with_post_publish_fence(
         &directory.path().join("websocket-message.sqlite"),
         websocket_bundle(),
         Arc::clone(&websocket_message_checks),
@@ -232,10 +243,14 @@ async fn websocket_events_reject_completion_when_ownership_fails_after_publicati
             .await,
         Err(CellError::Lease(_))
     ));
-    assert_post_publish_fence(&websocket_message_checks, websocket_message.state());
+    assert_post_publish_fence(
+        &websocket_message_checks,
+        websocket_message.state(),
+        &websocket_message_image,
+    );
 
     let websocket_close_checks = Arc::new(AtomicUsize::new(0));
-    let mut websocket_close = activate_with_post_publish_fence(
+    let (mut websocket_close, websocket_close_image) = activate_with_post_publish_fence(
         &directory.path().join("websocket-close.sqlite"),
         websocket_bundle(),
         Arc::clone(&websocket_close_checks),
@@ -252,7 +267,11 @@ async fn websocket_events_reject_completion_when_ownership_fails_after_publicati
             .await,
         Err(CellError::Lease(_))
     ));
-    assert_post_publish_fence(&websocket_close_checks, websocket_close.state());
+    assert_post_publish_fence(
+        &websocket_close_checks,
+        websocket_close.state(),
+        &websocket_close_image,
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
