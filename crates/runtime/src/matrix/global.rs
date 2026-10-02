@@ -147,7 +147,7 @@ pub(super) const HYPERDRIVE: RuntimeCapability = global(
 pub(super) const KVNAMESPACE: RuntimeCapability = global(
     "KvNamespace",
     CapabilityStatus::Supported,
-    "env KV bindings are instances of the KvNamespace constructor and preserve native get/put/delete/list plus metadata and expiration behavior in isolate tests",
+    "env KV bindings are instances of the KvNamespace constructor and preserve native get/put/delete/list, cursor normalization, metadata, expiration, compare-and-set, and invalid-list-limit behavior in isolate tests",
 );
 
 pub(super) const LOADER: RuntimeCapability = global(
@@ -291,13 +291,13 @@ pub(super) const WEBSOCKET: RuntimeCapability = global(
 pub(super) const WEBSOCKETPAIR: RuntimeCapability = global(
     "WebSocketPair",
     CapabilityStatus::Partial,
-    "in-isolate WebSocketPair accept/send/message/close lifecycle is runtime-tested; node HTTP upgrade handshake, selected subprotocol preservation, message frame bridging, stable Peren session handle, and session cleanup are process-tested; DurableObjectState acceptWebSocket/getWebSockets/auto-response, persisted accepted-socket metadata, dispatch hydration, and close cleanup are runtime-tested for the local Peren host model; full Cloudflare edge WebSocketPair parity outside that local host model remains unsupported",
+    "in-isolate WebSocketPair accept/send/message/close lifecycle, message-before-close ordering, attachment serialization, and release cleanup are runtime-tested; node HTTP upgrade handshake, selected subprotocol preservation, message frame bridging, stable Peren session handle, and session cleanup are process-tested; DurableObjectState acceptWebSocket/getWebSockets/auto-response, persisted accepted-socket metadata, dispatch hydration, and close cleanup are runtime-tested for the local Peren host model; distributed edge hibernation outside that local host model remains unsupported",
 );
 
 pub(super) const WEBSOCKETREQUESTRESPONSEPAIR: RuntimeCapability = global(
     "WebSocketRequestResponsePair",
     CapabilityStatus::Supported,
-    "cloudflare:workers exports WebSocketRequestResponsePair; DurableObjectState auto-response and accepted WebSocket lookup are runtime-tested",
+    "Peren worker exports WebSocketRequestResponsePair; DurableObjectState auto-response and accepted WebSocket lookup are runtime-tested",
 );
 
 pub(super) const WORKFLOW: RuntimeCapability = global(

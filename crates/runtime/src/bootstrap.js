@@ -577,6 +577,7 @@ class WebSocketCloseEvent extends event.Event {
 const newSocketState = () => ({
   accepted: false,
   attachmentId: `socket-${nextSocketAttachmentId++}`,
+  closeQueued: false,
   other: null,
   readyState: WebSocketPeer.CONNECTING,
   pending: [],
@@ -644,7 +645,9 @@ class WebSocketPeer extends event.EventTarget {
   }
 
   async serializeAttachment(value) {
-    const bytes = encodeStorageBytes(JSON.stringify(value));
+    const encoded = JSON.stringify(value);
+    if (encoded === undefined) throw new TypeError("WebSocket attachment must be JSON-serializable");
+    const bytes = encodeStorageBytes(encoded);
     await core.ops.op_storage_begin();
     let committed = false;
     try {
@@ -676,12 +679,13 @@ class WebSocketPeer extends event.EventTarget {
 
   close(code = 1000, reason = "") {
     const state = socket(this);
-    if (state.readyState === WebSocketPeer.CLOSED) return;
+    if (state.readyState === WebSocketPeer.CLOSING || state.readyState === WebSocketPeer.CLOSED) return;
     state.readyState = WebSocketPeer.CLOSING;
-    finishSocketClose(this, code, String(reason), true);
+    queueSocketClose(this, code, String(reason), true);
     const other = state.other;
-    if (other !== null && socket(other).readyState !== WebSocketPeer.CLOSED) {
-      finishSocketClose(other, code, String(reason), true);
+    if (other !== null && socket(other).readyState !== WebSocketPeer.CLOSING && socket(other).readyState !== WebSocketPeer.CLOSED) {
+      socket(other).readyState = WebSocketPeer.CLOSING;
+      queueSocketClose(other, code, String(reason), true);
     }
   }
 }
@@ -693,7 +697,7 @@ WebSocketPeer.CLOSED = 3;
 
 const receiveSocketEvent = (target, event) => {
   const state = socket(target);
-  if (state.readyState === WebSocketPeer.CLOSED) return;
+  if (state.readyState === WebSocketPeer.CLOSING || state.readyState === WebSocketPeer.CLOSED) return;
   if (!state.accepted) {
     state.pending.push(event);
     return;
@@ -701,20 +705,33 @@ const receiveSocketEvent = (target, event) => {
   emitSocketEvent(target, event);
 };
 
+const queueSocketClose = (target, code, reason, wasClean) => {
+  const state = socket(target);
+  if (state.closeQueued) return;
+  state.closeQueued = true;
+  state.pending = [];
+  emitSocketEvent(target, new WebSocketCloseEvent(code, reason, wasClean), () => {
+    state.readyState = WebSocketPeer.CLOSED;
+    socketByAttachment.delete(state.attachmentId);
+  });
+};
+
 const finishSocketClose = (target, code, reason, wasClean) => {
   const state = socket(target);
+  if (state.readyState === WebSocketPeer.CLOSED) return;
   state.readyState = WebSocketPeer.CLOSED;
   state.pending = [];
   socketByAttachment.delete(state.attachmentId);
   emitSocketEvent(target, new WebSocketCloseEvent(code, reason, wasClean));
 };
 
-const emitSocketEvent = (target, event) => {
+const emitSocketEvent = (target, event, after = undefined) => {
   PromiseResolve().then(() => {
     const state = socket(target);
     if (event.type === "message" && state.onmessage !== null) state.onmessage.call(target, event);
     if (event.type === "close" && state.onclose !== null) state.onclose.call(target, event);
     target.dispatchEvent(event);
+    if (typeof after === "function") after();
   });
 };
 
@@ -745,6 +762,13 @@ globalThis.__perenDrainWebSocketOutbound = (instance) => {
   const outbound = state.outbound;
   state.outbound = [];
   return outbound;
+};
+
+globalThis.__perenReleaseWebSocket = (id, code = 1000, reason = "") => {
+  const peer = socketByAttachment.get(String(id));
+  if (peer === undefined) return false;
+  finishSocketClose(peer, code, String(reason), true);
+  return true;
 };
 
 class WebSocketPair {
@@ -1076,6 +1100,18 @@ const kvReadValue = (value, options = {}) => {
   return decodeText(bytes);
 };
 
+const normalizeListLimit = (value, fallback = undefined) => {
+  if (value === undefined || value === null) return fallback;
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new TypeError("list limit must be a positive integer");
+  return limit;
+};
+
+const normalizeCursor = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  return String(value);
+};
+
 const kvPutBytes = (value) => {
   if (value instanceof ArrayBuffer) return Array.from(new Uint8Array(value));
   if (ArrayBuffer.isView(value)) return Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
@@ -1187,22 +1223,30 @@ class KvNamespace {
       const page = await core.ops.op_kv_list({
         namespace: this.scope,
         prefix: options.prefix === undefined ? undefined : String(options.prefix),
-        cursor: options.cursor === undefined ? undefined : String(options.cursor),
-        limit: options.limit === undefined ? undefined : Number(options.limit),
+        cursor: normalizeCursor(options.cursor),
+        limit: normalizeListLimit(options.limit),
       });
       return {
-        keys: page.keys,
+        keys: page.keys.map((key) => ObjectFreeze({
+          name: String(key.name),
+          metadata: key.metadata ?? undefined,
+        })),
         cursor: page.cursor === null ? undefined : decodeText(new Uint8Array(page.cursor)),
         list_complete: page.listComplete,
       };
     }
     const request = {};
     if (options.prefix !== undefined) request.prefix = ArrayFrom(encodeStorageBytes(String(options.prefix)));
-    if (options.cursor !== undefined) request.cursor = ArrayFrom(encodeStorageBytes(String(options.cursor)));
-    if (options.limit !== undefined) request.limit = Number(options.limit);
+    const cursor = normalizeCursor(options.cursor);
+    if (cursor !== undefined) request.cursor = ArrayFrom(encodeStorageBytes(cursor));
+    const limit = normalizeListLimit(options.limit);
+    if (limit !== undefined) request.limit = limit;
     const page = await core.ops.op_storage_list(this.scope, request);
     return {
-      keys: page.keys,
+      keys: page.keys.map((key) => ObjectFreeze({
+        name: String(key.name),
+        metadata: key.metadata ?? undefined,
+      })),
       cursor: page.cursor === null ? undefined : decodeText(new Uint8Array(page.cursor)),
       list_complete: page.listComplete,
     };
@@ -1351,34 +1395,6 @@ class R2Bucket {
   async get(key) {
     return r2Object(await core.ops.op_r2_get({ bucket: this.bucket, key: `${this.prefix}${String(key)}` }));
   }
-
-  async compareAndSet(key, expected, value, options = {}) {
-    if (this.provider.kind !== "native") {
-      throw new Error("KV compareAndSet is only supported by native KV");
-    }
-    const encoded = ArrayFrom(encodeStorageBytes(String(key)));
-    await core.ops.op_storage_begin();
-    let committed = false;
-    try {
-      const current = kvDecodeRecord(await core.ops.op_storage_get(this.scope, encoded));
-      const currentVersion = current.value === null ? null : current.version;
-      const expectsMissing = expected?.missing === true;
-      const expectedVersion = expected?.version === undefined ? undefined : Number(expected.version);
-      const matched = expectsMissing ? current.value === null : expectedVersion !== undefined && currentVersion === expectedVersion;
-      if (!matched) {
-        await core.ops.op_storage_rollback();
-        committed = true;
-        return { ok: false, version: currentVersion };
-      }
-      const version = Number(currentVersion ?? 0) + 1;
-      await core.ops.op_storage_put(this.scope, encoded, kvEnvelope(value, options, version));
-      await core.ops.op_storage_commit();
-      committed = true;
-      return { ok: true, version };
-    } finally {
-      if (!committed) await core.ops.op_storage_rollback();
-    }
-  }
   async delete(key) {
     const keys = Array.isArray(key) ? key : [key];
     for (const item of keys) {
@@ -1389,8 +1405,8 @@ class R2Bucket {
     const page = await core.ops.op_r2_list({
       bucket: this.bucket,
       prefix: `${this.prefix}${options.prefix ?? ""}`,
-      cursor: options.cursor ?? null,
-      limit: options.limit == null ? null : Number(options.limit),
+      cursor: normalizeCursor(options.cursor) ?? null,
+      limit: normalizeListLimit(options.limit, null),
     });
     return {
       objects: page.objects.map((object) => Object.freeze({
@@ -1400,6 +1416,7 @@ class R2Bucket {
       })),
       cursor: page.cursor ?? undefined,
       truncated: !page.listComplete,
+      delimitedPrefixes: ObjectFreeze([]),
     };
   }
 }
@@ -1414,7 +1431,6 @@ globalThis.R2Bucket = R2Bucket;
 
 const doEncode = (value) => btoa(String(value));
 const doDecode = (value) => atob(String(value));
-
 function scopedStorage(scope) {
   return ObjectFreeze({
     get: (key, options = {}) => storage.get(key, { ...options, scope }),
@@ -1448,6 +1464,13 @@ class DurableObjectFacetStub {
     return await Promise.resolve(this.instance.fetch(new Request(input, init)));
   }
 }
+
+const durableObjectExports = (target) => rpcProxy(ObjectFreeze({}), async (method, args) => {
+  const instance = typeof target === "function" ? target() : target;
+  const member = instance?.[method];
+  if (typeof member !== "function") throw new TypeError(`Durable Object does not export ${method}`);
+  return await Promise.resolve(member.apply(instance, args));
+});
 
 class DurableObjectFacets {
   constructor(env) {
@@ -1514,6 +1537,10 @@ function readDurableValue(bytes) {
 }
 
 function durableObjectStorage(inner) {
+  const wrapTransaction = (callback, method = "transaction") => inner[method](async (transaction) => {
+    const scoped = durableObjectTransactionStorage(transaction);
+    return await callback(scoped);
+  });
   return ObjectFreeze({
     get: async (key, options = {}) => readDurableValue(await inner.get(key, options)),
     put: async (key, value, options = {}) => {
@@ -1523,16 +1550,28 @@ function durableObjectStorage(inner) {
     },
     delete: (key, options) => inner.delete(key, options),
     deleteAll: (options) => inner.deleteAll(options),
-    transaction: (callback) => inner.transaction(callback),
-    mutation: (id, callback) => inner.mutation(id, callback),
+    transaction: (callback) => wrapTransaction(callback),
+    mutation: (id, callback) => wrapTransaction(callback, "mutation"),
+  });
+}
+
+function durableObjectTransactionStorage(transaction) {
+  return ObjectFreeze({
+    get: async (key, options = {}) => readDurableValue(await transaction.get(key, options)),
+    put: (key, value, options = {}) => transaction.put(key, durableValue(value), options),
+    delete: (key, options) => transaction.delete(key, options),
+    deleteAll: (options) => transaction.deleteAll(options),
   });
 }
 
 class DurableObjectState {
-  constructor(storageBinding = storage, env = {}) {
+  constructor(storageBinding = storage, env = {}, options = {}) {
     this.storage = durableObjectStorage(storageBinding);
     this.facets = ObjectFreeze(new DurableObjectFacets(env));
     this.env = env;
+    this.id = options.id ?? null;
+    this.props = ObjectFreeze({ ...(options.props ?? {}) });
+    this.exports = durableObjectExports(options.exports ?? {});
   }
 
   acceptWebSocket(socket, tags = []) {
@@ -1839,7 +1878,6 @@ const dispatchNamespace = (binding) => {
     },
   }));
 };
-
 const mtlsCertificate = (binding) => ObjectFreeze({ __perenMtlsBinding: binding });
 
 function imagesBinding(binding) {

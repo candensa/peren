@@ -45,13 +45,13 @@ pub(super) const WAITUNTIL: RuntimeCapability = event(
 pub(super) const WEBSOCKETCLOSE: RuntimeCapability = event(
     "webSocketClose",
     CapabilityStatus::Partial,
-    "WebSocketPair close events, runtime host re-entry, node upgraded-socket close bridging, DurableObjectState hibernation APIs, persisted accepted-socket metadata, persisted auto-response metadata, auto-response dispatch short-circuiting, dispatch hydration, and close cleanup are runtime-tested for the local Peren host model; full Cloudflare edge WebSocket hibernation behavior outside that local host model remains unsupported",
+    "WebSocketPair close events, runtime host re-entry, node upgraded-socket close bridging, DurableObjectState hibernation APIs, persisted accepted-socket metadata, persisted auto-response metadata, auto-response dispatch short-circuiting, dispatch hydration, ordered close cleanup, and release cleanup are runtime-tested for the local Peren host model; distributed edge hibernation outside that local host model remains unsupported",
 );
 
 pub(super) const WEBSOCKETMESSAGE: RuntimeCapability = event(
     "webSocketMessage",
     CapabilityStatus::Partial,
-    "WebSocketPair message events, runtime host re-entry, node upgraded-socket frame bridging, selected subprotocol preservation, session cleanup, DurableObjectState hibernation APIs, persisted accepted-socket metadata, persisted auto-response metadata, auto-response dispatch short-circuiting, and dispatch hydration are runtime-tested for the local Peren host model; full Cloudflare edge WebSocket hibernation behavior outside that local host model remains unsupported",
+    "WebSocketPair message events, runtime host re-entry, node upgraded-socket frame bridging, selected subprotocol preservation, session cleanup, DurableObjectState hibernation APIs, persisted accepted-socket metadata, persisted auto-response metadata, auto-response dispatch short-circuiting, dispatch hydration, and message-before-close ordering are runtime-tested for the local Peren host model; distributed edge hibernation outside that local host model remains unsupported",
 );
 
 pub(super) const WORKFLOW: RuntimeCapability = event(
