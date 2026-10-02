@@ -658,10 +658,7 @@ fn authorize_control_mutation(
     remember_control_nonce(app, &target_node, &nonce, timestamp_ms)
 }
 
-fn required_header(
-    headers: &HeaderMap,
-    name: &'static str,
-) -> Result<String, ControlAuthError> {
+fn required_header(headers: &HeaderMap, name: &'static str) -> Result<String, ControlAuthError> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
