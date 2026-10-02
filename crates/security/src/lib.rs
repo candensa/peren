@@ -379,10 +379,10 @@ fn verify_control_request_with_key(
     {
         return Err(CredentialError::Expired);
     }
-    let expected = sign(key, control_payload(request).as_bytes());
-    if expected != signature {
-        return Err(CredentialError::InvalidSignature);
-    }
+    let supplied = URL_SAFE_NO_PAD
+        .decode(signature)
+        .map_err(|_| CredentialError::InvalidSignature)?;
+    verify_signature(key, control_payload(request).as_bytes(), &supplied)?;
     Ok(())
 }
 
@@ -453,6 +453,14 @@ fn sign(key: &[u8], payload: &[u8]) -> String {
         .unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
     mac.update(payload);
     URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes())
+}
+
+fn verify_signature(key: &[u8], payload: &[u8], signature: &[u8]) -> Result<(), CredentialError> {
+    let mut mac = HmacSha256::new_from_slice(key)
+        .unwrap_or_else(|_| unreachable!("HMAC accepts any key length"));
+    mac.update(payload);
+    mac.verify_slice(signature)
+        .map_err(|_| CredentialError::InvalidSignature)
 }
 
 fn load_or_create_key(directory: &Path) -> Result<Vec<u8>, CredentialError> {
