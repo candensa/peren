@@ -223,16 +223,19 @@ wait_for_http() {
 
 run_config() {
   local config="$1"
-  local url code label
+  local url code label data_dir
   label="$(basename "$(dirname "$config")")"
   if [[ "$(basename "$config")" != "config.toml" ]]; then
     label="$label/$(basename "$config" .toml)"
   fi
+  data_dir="$log_dir/data/${config#"$root"/}"
+  data_dir="${data_dir%.toml}"
   prepare_bucket "$config"
   prepare_env "$config"
+  mkdir -p "$data_dir"
   url="$(public_url "$config")"
   cleanup
-  "$peren" serve "$config" >"$log_dir/serve.log" 2>&1 &
+  PEREN_DATA_DIR="$data_dir" "$peren" serve "$config" >"$log_dir/serve.log" 2>&1 &
   pid=$!
   code="$(wait_for_http "$url" "$config")" || return 1
   cleanup
@@ -252,7 +255,7 @@ main() {
     exit 0
   fi
   require_binary
-  mkdir -p "$log_dir" 
+  mkdir -p "$log_dir"
   cd "$root"
   prepare_certs
   while IFS= read -r config; do
