@@ -8,6 +8,7 @@ use axum::{
 use peren_config::QueueBroker;
 use peren_runtime::BundleError;
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::{ProviderError, SupervisorError};
 
@@ -82,6 +83,12 @@ pub enum ProcessError {
     },
     #[error("data directory operation failed")]
     Data(#[source] std::io::Error),
+    #[error("data directory {path:?} belongs to node {stored}; configured node id is {configured}")]
+    DataDirectoryNodeMismatch {
+        path: PathBuf,
+        stored: Uuid,
+        configured: Uuid,
+    },
     #[error(transparent)]
     Storage(#[from] peren_storage::StorageError),
     #[error(transparent)]

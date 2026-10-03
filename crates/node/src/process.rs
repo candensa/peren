@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fs,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{
@@ -270,6 +271,7 @@ impl Process {
         let data = environment
             .get("PEREN_DATA_DIR")
             .map_or_else(default_data, PathBuf::from);
+        verify_data_directory_identity(&data, config.raw.node.id)?;
         let bundles = bundles(&config.raw.services, &config.raw.dispatch_namespaces)?;
         Self::start_with_providers(config, providers, inherited, data, bundles, options).await
     }
@@ -514,6 +516,33 @@ pub(crate) fn default_data() -> PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| PathBuf::from("."))
         .join("data")
+}
+
+const NODE_IDENTITY_FILE: &str = "node.identity";
+
+fn verify_data_directory_identity(data: &Path, configured: Uuid) -> Result<(), ProcessError> {
+    fs::create_dir_all(data).map_err(ProcessError::Data)?;
+    let path = data.join(NODE_IDENTITY_FILE);
+    match fs::read_to_string(&path) {
+        Ok(text) => {
+            let stored = Uuid::parse_str(text.trim()).map_err(|source| {
+                ProcessError::Data(std::io::Error::new(std::io::ErrorKind::InvalidData, source))
+            })?;
+            if stored == configured {
+                Ok(())
+            } else {
+                Err(ProcessError::DataDirectoryNodeMismatch {
+                    path,
+                    stored,
+                    configured,
+                })
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::write(&path, configured.to_string()).map_err(ProcessError::Data)
+        }
+        Err(error) => Err(ProcessError::Data(error)),
+    }
 }
 
 fn process_context(
@@ -1053,3 +1082,45 @@ use host::{ProcessHost, cell};
 
 mod error;
 pub use error::ProcessError;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("peren-process-{name}-{}", Uuid::new_v4()))
+    }
+
+    #[test]
+    fn data_directory_identity_is_created_and_reused() {
+        let root = temp_dir("identity");
+        let node = Uuid::new_v4();
+
+        verify_data_directory_identity(&root, node).unwrap();
+        verify_data_directory_identity(&root, node).unwrap();
+
+        let recorded = fs::read_to_string(root.join(NODE_IDENTITY_FILE)).unwrap();
+        assert_eq!(recorded, node.to_string());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn data_directory_identity_rejects_node_id_changes() {
+        let root = temp_dir("mismatch");
+        let original = Uuid::new_v4();
+        let replacement = Uuid::new_v4();
+
+        verify_data_directory_identity(&root, original).unwrap();
+        let error = verify_data_directory_identity(&root, replacement).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ProcessError::DataDirectoryNodeMismatch {
+                stored,
+                configured,
+                ..
+            } if stored == original && configured == replacement
+        ));
+        let _ = fs::remove_dir_all(root);
+    }
+}
