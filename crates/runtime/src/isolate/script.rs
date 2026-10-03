@@ -31,9 +31,17 @@ pub(super) const DISPATCH_HTTP: &str = r#"
     : typeof durableClass === "function"
       ? await (async () => {
           const holder = { object: null };
+          const durableContext = globalThis.__perenDurableObjectContext ?? {};
+          const durableId = durableContext.id == null
+            ? null
+            : globalThis.__perenCreateDurableObjectId(
+                durableContext.id.namespace,
+                durableContext.id.value,
+                durableContext.id.name ?? null,
+              );
           const state = new DurableObjectState(globalThis.Peren.storage, globalThis.__perenEnv, {
-            id: null,
-            props: {},
+            id: durableId,
+            props: durableContext.props ?? {},
             exports: () => holder.object,
           });
           const object = new durableClass(state, globalThis.__perenEnv);

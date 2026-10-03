@@ -86,6 +86,194 @@ async fn response_is_rejected_when_ownership_fails_after_publication() {
     ));
 }
 
+async fn activate_with_post_publish_fence(
+    path: &Path,
+    bundle: WorkerBundle,
+    checks: Arc<AtomicUsize>,
+) -> (
+    WorkerCell<Lease, Repository>,
+    Arc<Mutex<Option<ReplicaImage>>>,
+) {
+    let repository = repository(false);
+    let image = Arc::clone(&repository.image);
+    let cell = WorkerCell::activate(
+        path,
+        Lease {
+            cell: CellId::from_bytes([1; 32]),
+            owner: NodeId::from_uuid(Uuid::new_v4()),
+            checks,
+            fail_at: 3,
+            releases: None,
+        },
+        repository,
+        bundle,
+        isolate(),
+        WorkerEnvironment::empty(),
+    )
+    .await
+    .unwrap();
+    (cell, image)
+}
+
+fn assert_post_publish_fence(
+    checks: &AtomicUsize,
+    state: CellState,
+    image: &Arc<Mutex<Option<ReplicaImage>>>,
+) {
+    assert_eq!(checks.load(Ordering::SeqCst), 3);
+    assert_eq!(state, CellState::Fenced);
+    assert!(image.lock().unwrap().is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn background_events_reject_completion_when_ownership_fails_after_publication() {
+    let directory = tempfile::tempdir().unwrap();
+
+    let alarm_checks = Arc::new(AtomicUsize::new(0));
+    let (mut alarm, alarm_image) = activate_with_post_publish_fence(
+        &directory.path().join("alarm.sqlite"),
+        alarm_bundle(),
+        Arc::clone(&alarm_checks),
+    )
+    .await;
+    assert!(matches!(
+        alarm.dispatch_alarm().await,
+        Err(CellError::Lease(_))
+    ));
+    assert_post_publish_fence(&alarm_checks, alarm.state(), &alarm_image);
+
+    let scheduled_checks = Arc::new(AtomicUsize::new(0));
+    let (mut scheduled, scheduled_image) = activate_with_post_publish_fence(
+        &directory.path().join("scheduled.sqlite"),
+        scheduled_bundle(),
+        Arc::clone(&scheduled_checks),
+    )
+    .await;
+    assert!(matches!(
+        scheduled
+            .dispatch_scheduled(ScheduledEvent {
+                scheduled_time_ms: 7_000,
+                cron: "*/5 * * * *".into(),
+            })
+            .await,
+        Err(CellError::Lease(_))
+    ));
+    assert_post_publish_fence(&scheduled_checks, scheduled.state(), &scheduled_image);
+
+    let queue_checks = Arc::new(AtomicUsize::new(0));
+    let (mut queue, queue_image) = activate_with_post_publish_fence(
+        &directory.path().join("queue.sqlite"),
+        queue_bundle(),
+        Arc::clone(&queue_checks),
+    )
+    .await;
+    assert!(matches!(
+        queue
+            .dispatch_queue(QueueEvent {
+                metrics: QueueMetrics::default(),
+                queue: "jobs".into(),
+                messages: vec![peren_runtime::QueueMessage {
+                    id: "message-1".into(),
+                    body: vec![9],
+                    attempts: 1,
+                    timestamp: 1_700_000_000_000,
+                }],
+            })
+            .await,
+        Err(CellError::Lease(_))
+    ));
+    assert_post_publish_fence(&queue_checks, queue.state(), &queue_image);
+
+    let tail_checks = Arc::new(AtomicUsize::new(0));
+    let (mut tail, tail_image) = activate_with_post_publish_fence(
+        &directory.path().join("tail.sqlite"),
+        tail_bundle(),
+        Arc::clone(&tail_checks),
+    )
+    .await;
+    assert!(matches!(
+        tail.dispatch_tail(TailEvent {
+            events: vec![peren_runtime::TailRecord {
+                outcome: "ok".into(),
+                script: "worker".into(),
+                wall_time_ms: 11,
+            }],
+        })
+        .await,
+        Err(CellError::Lease(_))
+    ));
+    assert_post_publish_fence(&tail_checks, tail.state(), &tail_image);
+
+    let workflow_checks = Arc::new(AtomicUsize::new(0));
+    let (mut workflow, workflow_image) = activate_with_post_publish_fence(
+        &directory.path().join("workflow.sqlite"),
+        workflow_bundle(),
+        Arc::clone(&workflow_checks),
+    )
+    .await;
+    assert!(matches!(
+        workflow
+            .dispatch_workflow(WorkflowEvent {
+                instance: "instance-1".into(),
+                payload: serde_json::json!({ "value": 5 }),
+            })
+            .await,
+        Err(CellError::Lease(_))
+    ));
+    assert_post_publish_fence(&workflow_checks, workflow.state(), &workflow_image);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn websocket_events_reject_completion_when_ownership_fails_after_publication() {
+    let directory = tempfile::tempdir().unwrap();
+
+    let websocket_message_checks = Arc::new(AtomicUsize::new(0));
+    let (mut websocket_message, websocket_message_image) = activate_with_post_publish_fence(
+        &directory.path().join("websocket-message.sqlite"),
+        websocket_bundle(),
+        Arc::clone(&websocket_message_checks),
+    )
+    .await;
+    assert!(matches!(
+        websocket_message
+            .dispatch_websocket_message(WebSocketMessageEvent {
+                id: "socket-1".into(),
+                message: "A".into(),
+            })
+            .await,
+        Err(CellError::Lease(_))
+    ));
+    assert_post_publish_fence(
+        &websocket_message_checks,
+        websocket_message.state(),
+        &websocket_message_image,
+    );
+
+    let websocket_close_checks = Arc::new(AtomicUsize::new(0));
+    let (mut websocket_close, websocket_close_image) = activate_with_post_publish_fence(
+        &directory.path().join("websocket-close.sqlite"),
+        websocket_bundle(),
+        Arc::clone(&websocket_close_checks),
+    )
+    .await;
+    assert!(matches!(
+        websocket_close
+            .dispatch_websocket_close(WebSocketCloseEvent {
+                id: "socket-1".into(),
+                code: 1007,
+                reason: "done".into(),
+                was_clean: true,
+            })
+            .await,
+        Err(CellError::Lease(_))
+    ));
+    assert_post_publish_fence(
+        &websocket_close_checks,
+        websocket_close.state(),
+        &websocket_close_image,
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn checkpoint_prunes_old_replica_generations() {
     let directory = tempfile::tempdir().unwrap();

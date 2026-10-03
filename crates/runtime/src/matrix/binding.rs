@@ -39,7 +39,7 @@ pub(super) const DISPATCHER: RuntimeCapability = binding(
 pub(super) const DURABLE_OBJECT_NAMESPACE: RuntimeCapability = binding(
     "durable_object_namespace",
     CapabilityStatus::Supported,
-    "config hydration, namespace id/stub shape, stub fetch routing to durable object service cells, in-isolate state id/props/exports ergonomics, facet RPC, and decoded storage transactions are tested; host-routed startup props require a future host protocol extension",
+    "config hydration, namespace id/stub shape, stub fetch routing to durable object service cells, host-routed startup props, in-isolate state id/props/exports ergonomics, facet RPC, and decoded storage transactions are tested",
 );
 
 pub(super) const HYPERDRIVE: RuntimeCapability = binding(

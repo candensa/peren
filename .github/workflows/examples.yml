@@ -31,7 +31,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+        with:
+          toolchain: 1.97.0
       - run: cargo fmt --all -- --check
 
   clippy:
@@ -40,7 +42,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+        with:
+          toolchain: 1.97.0
       - name: install native build dependencies
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -51,7 +55,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+        with:
+          toolchain: 1.97.0
       - name: install native build dependencies
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
       - run: cargo test --workspace --all-features
@@ -62,7 +68,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+        with:
+          toolchain: 1.97.0
       - name: install native build dependencies
         run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
       - run: cargo build --release --locked -p peren
@@ -78,7 +86,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+        with:
+          toolchain: 1.97.0
       - run: cargo fetch --locked
       - uses: actions/download-artifact@v8
         with:

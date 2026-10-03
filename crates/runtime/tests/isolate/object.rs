@@ -64,6 +64,65 @@ async fn durable_object_stub_fetches_through_host_capability() {
     assert_eq!(requests[0].request.url, "https://room.internal/message");
 }
 
+#[tokio::test]
+async fn durable_object_stub_fetch_carries_startup_props() {
+    let bundle = bundle(
+        r"export default { async fetch(_request, env) {
+              const id = env.ROOMS.idFromName('lobby');
+              const stub = env.ROOMS.get(id, { props: { region: 'eu', shard: 7 } });
+              await stub.fetch('https://room.internal/message');
+              return new Response('ok');
+            } };",
+    );
+    let storage = Arc::new(Host::default());
+    let durable = Arc::new(DurableHost {
+        requests: Mutex::new(Vec::new()),
+    });
+    let env = WorkerEnvironment::new(BTreeMap::from([(
+        "__perenBindings".to_string(),
+        r#"{"ROOMS":{"type":"durable_object_namespace","className":"Room"}}"#.to_string(),
+    )]));
+    let mut runtime = WorkerRuntime::load_with_capabilities(
+        bundle,
+        limits(),
+        env,
+        Capabilities {
+            storage,
+            fetch: None,
+            queue: None,
+            r2: None,
+            service: None,
+            durable: Some(durable.clone()),
+            cache: None,
+            kv: None,
+            ai: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.test/".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(1024, 10),
+        )
+        .await
+        .unwrap();
+
+    let requests = durable.requests.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].props,
+        serde_json::json!({ "region": "eu", "shard": 7 })
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn durable_object_namespace_exposes_ids_and_stubs() {
     let mut values = BTreeMap::new();

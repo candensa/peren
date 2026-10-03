@@ -304,11 +304,24 @@ export interface DurableObjectId {
 
 export interface DurableObjectStub extends Fetcher {}
 
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export interface DurableObjectGetOptions {
+  props?: Record<string, JsonValue>;
+  startupProps?: Record<string, JsonValue>;
+}
+
 export interface DurableObjectNamespace {
   idFromName(name: string): DurableObjectId;
   idFromString(id: string): DurableObjectId;
   newUniqueId(): DurableObjectId;
-  get(id: DurableObjectId): DurableObjectStub;
+  get(id: DurableObjectId, options?: DurableObjectGetOptions): DurableObjectStub;
 }
 
 export interface ServiceBinding extends Fetcher {}

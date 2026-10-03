@@ -413,6 +413,31 @@ impl WorkerRuntime {
         Ok(())
     }
 
+    pub fn bind_durable_object_context(
+        &mut self,
+        namespace: &str,
+        id: &str,
+        name: Option<&str>,
+        props: &serde_json::Value,
+    ) -> Result<(), EngineError> {
+        let context = serde_json::json!({
+            "id": {
+                "namespace": namespace,
+                "value": id,
+                "name": name,
+            },
+            "props": props,
+        });
+        let source = format!(
+            "globalThis.__perenDurableObjectContext = {};",
+            serde_json::to_string(&context).map_err(|_| EngineError::Allocation)?
+        );
+        self.runtime
+            .execute_script("peren:durable-object-context", FastString::from(source))
+            .map_err(|_| EngineError::Allocation)?;
+        Ok(())
+    }
+
     pub fn committed_revision(&self) -> peren_primitives::StorageRevision {
         self.storage.as_ref().map_or_else(
             peren_primitives::StorageRevision::default,
