@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    io::Write,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{
@@ -523,25 +524,90 @@ const NODE_IDENTITY_FILE: &str = "node.identity";
 fn verify_data_directory_identity(data: &Path, configured: Uuid) -> Result<(), ProcessError> {
     fs::create_dir_all(data).map_err(ProcessError::Data)?;
     let path = data.join(NODE_IDENTITY_FILE);
+    match validate_data_directory_identity(&path, configured) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            initialize_data_directory_identity(data, &path, configured)?;
+            validate_data_directory_identity(&path, configured).map_err(Into::into)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn validate_data_directory_identity(path: &Path, configured: Uuid) -> Result<(), ProcessErrorOrIo> {
     match fs::read_to_string(&path) {
         Ok(text) => {
             let stored = Uuid::parse_str(text.trim()).map_err(|source| {
-                ProcessError::Data(std::io::Error::new(std::io::ErrorKind::InvalidData, source))
+                ProcessErrorOrIo::Process(ProcessError::Data(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    source,
+                )))
             })?;
             if stored == configured {
                 Ok(())
             } else {
-                Err(ProcessError::DataDirectoryNodeMismatch {
-                    path,
-                    stored,
-                    configured,
-                })
+                Err(ProcessErrorOrIo::Process(
+                    ProcessError::DataDirectoryNodeMismatch {
+                        path: path.to_path_buf(),
+                        stored,
+                        configured,
+                    },
+                ))
             }
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::write(&path, configured.to_string()).map_err(ProcessError::Data)
+        Err(error) => Err(ProcessErrorOrIo::Io(error)),
+    }
+}
+
+fn initialize_data_directory_identity(
+    data: &Path,
+    path: &Path,
+    configured: Uuid,
+) -> Result<(), ProcessError> {
+    let temporary = data.join(format!(
+        ".{NODE_IDENTITY_FILE}.{}.tmp",
+        Uuid::new_v4().simple()
+    ));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(configured.to_string().as_bytes())?;
+        file.sync_all()?;
+        match fs::hard_link(&temporary, path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(error) => Err(error),
         }
-        Err(error) => Err(ProcessError::Data(error)),
+    })();
+    let cleanup = fs::remove_file(&temporary);
+    match (result, cleanup) {
+        (Ok(()), Ok(()) | Err(_)) => Ok(()),
+        (Err(error), _) => Err(ProcessError::Data(error)),
+    }
+}
+
+enum ProcessErrorOrIo {
+    Process(ProcessError),
+    Io(std::io::Error),
+}
+
+impl ProcessErrorOrIo {
+    fn kind(&self) -> std::io::ErrorKind {
+        match self {
+            Self::Process(_) => std::io::ErrorKind::Other,
+            Self::Io(error) => error.kind(),
+        }
+    }
+}
+
+impl From<ProcessErrorOrIo> for ProcessError {
+    fn from(error: ProcessErrorOrIo) -> Self {
+        match error {
+            ProcessErrorOrIo::Process(error) => error,
+            ProcessErrorOrIo::Io(error) => ProcessError::Data(error),
+        }
     }
 }
 
