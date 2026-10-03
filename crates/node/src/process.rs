@@ -535,7 +535,7 @@ fn verify_data_directory_identity(data: &Path, configured: Uuid) -> Result<(), P
 }
 
 fn validate_data_directory_identity(path: &Path, configured: Uuid) -> Result<(), ProcessErrorOrIo> {
-    match fs::read_to_string(&path) {
+    match fs::read_to_string(path) {
         Ok(text) => {
             let stored = Uuid::parse_str(text.trim()).map_err(|source| {
                 ProcessErrorOrIo::Process(ProcessError::Data(std::io::Error::new(
