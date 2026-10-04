@@ -3,9 +3,9 @@ title: "Metrics reference"
 description: "Prometheus series exported by Peren on /metrics."
 ---
 
-Peren exports these series from `/metrics` in Prometheus text format. Names and meanings match the HELP strings in the node metrics exporter. Do not invent additional series.
+Peren exposes Prometheus metrics from `/metrics` on each configured listener. Use these series to monitor process health, request traffic, cell lifecycle, storage activity, bindings, queues, and WebSockets.
 
-An operator may scrape `/metrics` with Prometheus.
+Scrape `/metrics` from a private network or from the monitoring path you already use for node-level infrastructure. Metric labels stay low-cardinality; Peren does not include cell ids, request ids, filesystem paths, provider endpoints, or secrets in exported series.
 
 ## Process and listener
 
@@ -44,8 +44,23 @@ An operator may scrape `/metrics` with Prometheus.
 | --- | --- | --- |
 | `peren_http_requests_total` | counter | HTTP requests observed by this node. |
 | `peren_http_errors_total` | counter | HTTP requests completed with a 5xx status or dispatch failure. |
+| `peren_http_request_duration_seconds` | histogram | HTTP request wall time in seconds. |
 | `peren_http_duration_ms_total` | counter | Total HTTP request wall time in milliseconds. |
-| `peren_http_duration_ms` | histogram | HTTP request wall time in milliseconds. |
+| `peren_http_duration_ms` | histogram | HTTP request wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_http_request_duration_seconds`. |
+
+## Worker and cell lifecycle
+
+| Series | Type | Meaning |
+| --- | --- | --- |
+| `peren_worker_dispatches_total` | counter | Worker fetch dispatches completed by this node. |
+| `peren_worker_dispatch_errors_total` | counter | Worker fetch dispatches that returned an error response or failed. |
+| `peren_worker_dispatch_duration_seconds` | histogram | Worker fetch dispatch wall time in seconds. |
+| `peren_cell_restores_total` | counter | Cell restore phases completed before dispatch. |
+| `peren_cell_dispatches_total` | counter | Cell dispatch phases completed. |
+| `peren_cell_dispatch_errors_total` | counter | Cell dispatch phases that returned an error response or failed. |
+| `peren_cell_commits_total` | counter | Cell dispatches that published a durable storage commit. |
+| `peren_cell_releases_total` | counter | Cell release phases completed successfully. |
+| `peren_cell_release_errors_total` | counter | Cell release phases that failed. |
 
 ## Queues
 
@@ -56,21 +71,26 @@ An operator may scrape `/metrics` with Prometheus.
 | `peren_queue_messages_total` | counter | Queue messages leased for dispatch. |
 | `peren_queue_dispatches_total` | counter | Queue batches dispatched to Workers. |
 | `peren_queue_errors_total` | counter | Queue lease or dispatch failures. |
+| `peren_queue_dispatch_duration_seconds` | histogram | Queue dispatch wall time in seconds. |
 | `peren_queue_dispatch_duration_ms_total` | counter | Total queue dispatch wall time in milliseconds. |
-| `peren_queue_dispatch_duration_ms` | histogram | Queue dispatch wall time in milliseconds. |
+| `peren_queue_dispatch_duration_ms` | histogram | Queue dispatch wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_queue_dispatch_duration_seconds`. |
 | `peren_queue_sends_total` | counter | Worker queue sends completed through bindings. |
 | `peren_queue_send_errors_total` | counter | Worker queue send failures. |
+| `peren_queue_send_duration_seconds` | histogram | Worker queue send wall time in seconds. |
 | `peren_queue_send_duration_ms_total` | counter | Total Worker queue send wall time in milliseconds. |
-| `peren_queue_send_duration_ms` | histogram | Worker queue send wall time in milliseconds. |
+| `peren_queue_send_duration_ms` | histogram | Worker queue send wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_queue_send_duration_seconds`. |
 
 ## Storage
 
 | Series | Type | Meaning |
 | --- | --- | --- |
 | `peren_storage_commits_total` | counter | Durable storage commits completed through the node host. |
+| `peren_storage_commit_errors_total` | counter | Durable storage commit failures through the node host. |
+| `peren_storage_commit_duration_seconds` | histogram | Durable storage commit wall time in seconds. |
 | `peren_storage_commit_duration_ms_total` | counter | Total durable storage commit wall time in milliseconds. |
-| `peren_storage_commit_duration_ms` | histogram | Durable storage commit wall time in milliseconds. |
+| `peren_storage_commit_duration_ms` | histogram | Durable storage commit wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_storage_commit_duration_seconds`. |
 | `peren_storage_rollbacks_total` | counter | Durable storage rollbacks completed through the node host. |
+| `peren_storage_rollback_errors_total` | counter | Durable storage rollback failures through the node host. |
 
 ## Bindings
 
@@ -78,36 +98,44 @@ An operator may scrape `/metrics` with Prometheus.
 | --- | --- | --- |
 | `peren_r2_operations_total` | counter | R2 binding operations completed through the node host. |
 | `peren_r2_errors_total` | counter | R2 binding operation failures. |
+| `peren_r2_duration_seconds` | histogram | R2 binding operation wall time in seconds. |
 | `peren_r2_duration_ms_total` | counter | Total R2 binding operation wall time in milliseconds. |
-| `peren_r2_duration_ms` | histogram | R2 binding operation wall time in milliseconds. |
+| `peren_r2_duration_ms` | histogram | R2 binding operation wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_r2_duration_seconds`. |
 | `peren_kv_operations_total` | counter | KV binding operations completed through the node host. |
 | `peren_kv_errors_total` | counter | KV binding operation failures. |
+| `peren_kv_duration_seconds` | histogram | KV binding operation wall time in seconds. |
 | `peren_kv_duration_ms_total` | counter | Total KV binding operation wall time in milliseconds. |
-| `peren_kv_duration_ms` | histogram | KV binding operation wall time in milliseconds. |
+| `peren_kv_duration_ms` | histogram | KV binding operation wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_kv_duration_seconds`. |
 | `peren_d1_queries_total` | counter | D1 SQL queries completed through the node host. |
 | `peren_d1_errors_total` | counter | D1 SQL query failures. |
+| `peren_d1_duration_seconds` | histogram | D1 SQL query wall time in seconds. |
 | `peren_d1_duration_ms_total` | counter | Total D1 SQL query wall time in milliseconds. |
-| `peren_d1_duration_ms` | histogram | D1 SQL query wall time in milliseconds. |
+| `peren_d1_duration_ms` | histogram | D1 SQL query wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_d1_duration_seconds`. |
 | `peren_cache_operations_total` | counter | Cache binding operations completed through the node host. |
 | `peren_cache_errors_total` | counter | Cache binding operation failures. |
+| `peren_cache_duration_seconds` | histogram | Cache binding operation wall time in seconds. |
 | `peren_cache_duration_ms_total` | counter | Total cache binding operation wall time in milliseconds. |
-| `peren_cache_duration_ms` | histogram | Cache binding operation wall time in milliseconds. |
+| `peren_cache_duration_ms` | histogram | Cache binding operation wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_cache_duration_seconds`. |
 | `peren_ai_runs_total` | counter | AI binding calls completed through the node host. |
 | `peren_ai_errors_total` | counter | AI binding call failures. |
+| `peren_ai_duration_seconds` | histogram | AI binding call wall time in seconds. |
 | `peren_ai_duration_ms_total` | counter | Total AI binding call wall time in milliseconds. |
-| `peren_ai_duration_ms` | histogram | AI binding call wall time in milliseconds. |
+| `peren_ai_duration_ms` | histogram | AI binding call wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_ai_duration_seconds`. |
 | `peren_service_fetches_total` | counter | Service binding fetches completed. |
 | `peren_service_errors_total` | counter | Service binding fetch failures. |
+| `peren_service_duration_seconds` | histogram | Service binding fetch wall time in seconds. |
 | `peren_service_duration_ms_total` | counter | Total service binding fetch wall time in milliseconds. |
-| `peren_service_duration_ms` | histogram | Service binding fetch wall time in milliseconds. |
+| `peren_service_duration_ms` | histogram | Service binding fetch wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_service_duration_seconds`. |
 | `peren_outbound_fetches_total` | counter | Host-gated outbound fetches completed. |
 | `peren_outbound_errors_total` | counter | Host-gated outbound fetch failures. |
+| `peren_outbound_duration_seconds` | histogram | Host-gated outbound fetch wall time in seconds. |
 | `peren_outbound_duration_ms_total` | counter | Total time spent on allowed outbound fetch, in milliseconds. |
-| `peren_outbound_duration_ms` | histogram | Host-gated outbound fetch wall time in milliseconds. |
+| `peren_outbound_duration_ms` | histogram | Host-gated outbound fetch wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_outbound_duration_seconds`. |
 | `peren_object_fetches_total` | counter | Durable Object binding fetches completed. |
 | `peren_object_errors_total` | counter | Durable Object binding fetch failures. |
+| `peren_object_duration_seconds` | histogram | Durable Object binding fetch wall time in seconds. |
 | `peren_object_duration_ms_total` | counter | Total Durable Object binding fetch wall time in milliseconds. |
-| `peren_object_duration_ms` | histogram | Durable Object binding fetch wall time in milliseconds. |
+| `peren_object_duration_ms` | histogram | Durable Object binding fetch wall time in milliseconds. Existing dashboards can continue to use this series; new dashboards should use `peren_object_duration_seconds`. |
 
 ## WebSockets
 
@@ -115,7 +143,10 @@ An operator may scrape `/metrics` with Prometheus.
 | --- | --- | --- |
 | `peren_websocket_sessions_total` | counter | WebSocket upgrade sessions accepted by Workers. |
 | `peren_websocket_sessions_registered` | gauge | WebSocket sessions tracked by the host registry. |
+| `peren_websocket_messages_total` | counter | WebSocket messages received from clients and dispatched to Workers. |
+| `peren_websocket_closes_total` | counter | WebSocket close events observed by the host bridge. |
+| `peren_websocket_errors_total` | counter | WebSocket bridge or dispatch failures. |
 
-Duration histograms use fixed buckets at 1, 5, 10, 25, 50, 100, 250, and 1000 milliseconds, plus `+Inf`.
+Duration histograms use fixed buckets at 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, and 1.0 seconds, plus `+Inf`. The older `_ms` histograms use the same bucket boundaries expressed in milliseconds.
 
 Related: [Observability](/docs/operations/observability/), [Operations overview](/docs/operate/overview/).

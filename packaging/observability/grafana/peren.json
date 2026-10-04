@@ -189,17 +189,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum(rate(peren_http_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(peren_http_request_duration_seconds_bucket[5m])) by (le))",
           "refId": "p50",
           "legendFormat": "p50"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_http_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_http_request_duration_seconds_bucket[5m])) by (le))",
           "refId": "p95",
           "legendFormat": "p95"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(peren_http_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(peren_http_request_duration_seconds_bucket[5m])) by (le))",
           "refId": "p99",
           "legendFormat": "p99"
         }
@@ -212,7 +212,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       }
@@ -311,12 +311,12 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_queue_dispatch_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_queue_dispatch_duration_seconds_bucket[5m])) by (le))",
           "refId": "dispatch p95",
           "legendFormat": "dispatch p95"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_queue_send_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_queue_send_duration_seconds_bucket[5m])) by (le))",
           "refId": "send p95",
           "legendFormat": "send p95"
         }
@@ -329,7 +329,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       }
@@ -354,7 +354,7 @@
           "legendFormat": "rollbacks/s"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_storage_commit_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_storage_commit_duration_seconds_bucket[5m])) by (le))",
           "refId": "commit p95",
           "legendFormat": "commit p95"
         }
@@ -367,7 +367,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       }
@@ -424,27 +424,27 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_r2_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_r2_duration_seconds_bucket[5m])) by (le))",
           "refId": "r2",
           "legendFormat": "r2"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_kv_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_kv_duration_seconds_bucket[5m])) by (le))",
           "refId": "kv",
           "legendFormat": "kv"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_d1_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_d1_duration_seconds_bucket[5m])) by (le))",
           "refId": "d1",
           "legendFormat": "d1"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_cache_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_cache_duration_seconds_bucket[5m])) by (le))",
           "refId": "cache",
           "legendFormat": "cache"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_ai_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_ai_duration_seconds_bucket[5m])) by (le))",
           "refId": "ai",
           "legendFormat": "ai"
         }
@@ -457,7 +457,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       }
@@ -504,17 +504,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_service_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_service_duration_seconds_bucket[5m])) by (le))",
           "refId": "service",
           "legendFormat": "service"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_object_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_object_duration_seconds_bucket[5m])) by (le))",
           "refId": "durable object",
           "legendFormat": "durable object"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(peren_outbound_duration_ms_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(peren_outbound_duration_seconds_bucket[5m])) by (le))",
           "refId": "outbound",
           "legendFormat": "outbound"
         }
@@ -527,7 +527,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       }

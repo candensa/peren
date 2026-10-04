@@ -347,15 +347,22 @@ async fn bridge(
                     id: session.id.clone(),
                     message: text.to_string(),
                 };
-                let Ok(dispatch) =
-                    dispatch_websocket_message_worker(app.clone(), session.cell, event).await
-                else {
-                    let _ = stream.close(None).await;
-                    let _ = app.websocket_sessions.remove(&session_id);
-                    return;
-                };
+                let dispatch =
+                    match dispatch_websocket_message_worker(app.clone(), session.cell, event).await
+                    {
+                        Ok(dispatch) => dispatch,
+                        Err(error) => {
+                            if is_websocket_worker_boundary_error(&error) {
+                                Telemetry::inc(&app.telemetry.websocket_errors);
+                            }
+                            let _ = stream.close(None).await;
+                            let _ = app.websocket_sessions.remove(&session_id);
+                            return;
+                        }
+                    };
                 for frame in dispatch.outbound {
                     if stream.send(Message::Text(frame.into())).await.is_err() {
+                        Telemetry::inc(&app.telemetry.websocket_errors);
                         let _ = app.websocket_sessions.remove(&session_id);
                         return;
                     }
@@ -369,13 +376,19 @@ async fn bridge(
                     reason,
                     was_clean: true,
                 };
-                if let Ok(dispatch) =
-                    dispatch_websocket_close_worker(app.clone(), session.cell, event).await
-                {
-                    for frame in dispatch.outbound {
-                        if stream.send(Message::Text(frame.into())).await.is_err() {
-                            let _ = app.websocket_sessions.remove(&session_id);
-                            return;
+                match dispatch_websocket_close_worker(app.clone(), session.cell, event).await {
+                    Ok(dispatch) => {
+                        for frame in dispatch.outbound {
+                            if stream.send(Message::Text(frame.into())).await.is_err() {
+                                Telemetry::inc(&app.telemetry.websocket_errors);
+                                let _ = app.websocket_sessions.remove(&session_id);
+                                return;
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        if is_websocket_worker_boundary_error(&error) {
+                            Telemetry::inc(&app.telemetry.websocket_errors);
                         }
                     }
                 }
@@ -385,13 +398,17 @@ async fn bridge(
             }
             Ok(Message::Binary(_) | Message::Ping(_) | Message::Pong(_) | Message::Frame(_)) => {}
             Err(_) => {
+                Telemetry::inc(&app.telemetry.websocket_errors);
                 let event = WebSocketCloseEvent {
                     id: session.id.clone(),
                     code: 1006,
                     reason: "connection error".into(),
                     was_clean: false,
                 };
-                let _ = dispatch_websocket_close_worker(app.clone(), session.cell, event).await;
+                record_websocket_close_worker_error(
+                    &app,
+                    dispatch_websocket_close_worker(app.clone(), session.cell, event).await,
+                );
                 let _ = app.websocket_sessions.remove(&session_id);
                 return;
             }
@@ -403,7 +420,10 @@ async fn bridge(
         reason: String::new(),
         was_clean: true,
     };
-    let _ = dispatch_websocket_close_worker(app.clone(), session.cell, event).await;
+    record_websocket_close_worker_error(
+        &app,
+        dispatch_websocket_close_worker(app.clone(), session.cell, event).await,
+    );
     let _ = app.websocket_sessions.remove(&session_id);
 }
 
@@ -437,6 +457,21 @@ async fn dispatch_websocket_close_worker(
     })
     .await
     .map_err(|error| ProcessError::Task(error.to_string()))?
+}
+
+fn is_websocket_worker_boundary_error(error: &ProcessError) -> bool {
+    matches!(error, ProcessError::Runtime(_) | ProcessError::Task(_))
+}
+
+fn record_websocket_close_worker_error(
+    app: &SocketApp,
+    result: Result<WebSocketDispatch, ProcessError>,
+) {
+    if let Err(error) = result
+        && is_websocket_worker_boundary_error(&error)
+    {
+        Telemetry::inc(&app.telemetry.websocket_errors);
+    }
 }
 
 fn close_parts(frame: Option<&CloseFrame>) -> (u16, String) {
@@ -547,7 +582,30 @@ pub(crate) async fn dispatch_worker(
     let telemetry = Arc::clone(&app.telemetry);
     let session_cell = dispatch.cell;
     let session_path = path.clone();
-    let dispatch = dispatch_cell(app, dispatch).await?;
+    let worker_started = Instant::now();
+    Telemetry::inc(&telemetry.worker_dispatches);
+    let dispatch = match dispatch_cell(app, dispatch).await {
+        Ok(dispatch) => {
+            Telemetry::observe(
+                &telemetry.worker_dispatch_duration_ms,
+                &telemetry.worker_dispatch_duration,
+                worker_started,
+            );
+            if dispatch.response.status >= 500 {
+                Telemetry::inc(&telemetry.worker_dispatch_errors);
+            }
+            dispatch
+        }
+        Err(error) => {
+            Telemetry::inc(&telemetry.worker_dispatch_errors);
+            Telemetry::observe(
+                &telemetry.worker_dispatch_duration_ms,
+                &telemetry.worker_dispatch_duration,
+                worker_started,
+            );
+            return Err(error);
+        }
+    };
     let mut response = dispatch.response;
     record_tail(TailRecord {
         tail: &tail_path,
@@ -699,6 +757,7 @@ async fn dispatch_cell_plain(
     let service = app.service.to_string();
     let trace_sink = app.trace.clone();
     let trace_context = dispatch.trace.clone();
+    let telemetry = Arc::clone(&app.telemetry);
     app.node
         .restore_and_dispatch(dispatch.cell, |input| async move {
             let cell_id = dispatch.cell.to_string();
@@ -708,6 +767,7 @@ async fn dispatch_cell_plain(
                 crate::RestoreSource::Empty => "empty".to_string(),
                 crate::RestoreSource::Restored { .. } => "restored".to_string(),
             };
+            Telemetry::inc(&telemetry.cell_restores);
             let _ = trace_sink.record_span(
                 &trace_context.child(),
                 SpanRecord {
@@ -735,9 +795,20 @@ async fn dispatch_cell_plain(
             .await?;
             let dispatch_started = Instant::now();
             let dispatch_started_at_ms = trace::now_ms();
-            let response = resident
+            let response = match resident
                 .dispatch_http(dispatch.request, dispatch.invocation)
-                .await?;
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    Telemetry::inc(&telemetry.cell_dispatch_errors);
+                    return Err(error.into());
+                }
+            };
+            Telemetry::inc(&telemetry.cell_dispatches);
+            if response.status >= 500 {
+                Telemetry::inc(&telemetry.cell_dispatch_errors);
+            }
             resident
                 .checkpoint_if_wal_exceeds(app.checkpoint_threshold_bytes)
                 .await?;
@@ -763,6 +834,7 @@ async fn dispatch_cell_plain(
                 },
             );
             if let Some(commit) = commit {
+                Telemetry::inc(&telemetry.cell_commits);
                 let _ = trace_sink.record_span(
                     &trace_context.child(),
                     SpanRecord {
@@ -783,7 +855,11 @@ async fn dispatch_cell_plain(
             let logs = resident.take_console_events();
             let release_started = Instant::now();
             let release_started_at_ms = trace::now_ms();
-            resident.release().await?;
+            if let Err(error) = resident.release().await {
+                Telemetry::inc(&telemetry.cell_release_errors);
+                return Err(error.into());
+            }
+            Telemetry::inc(&telemetry.cell_releases);
             let _ = trace_sink.record_span(
                 &trace_context.child(),
                 SpanRecord {
@@ -825,6 +901,7 @@ async fn dispatch_cell_host(
     let limits = app.limits;
     let trace_sink = app.trace.clone();
     let trace_context = dispatch.trace.clone();
+    let telemetry = Arc::clone(&app.telemetry);
 
     app.node
         .restore_and_dispatch(dispatch.cell, |input| async move {
@@ -835,6 +912,7 @@ async fn dispatch_cell_host(
                 crate::RestoreSource::Empty => "empty".to_string(),
                 crate::RestoreSource::Restored { .. } => "restored".to_string(),
             };
+            Telemetry::inc(&telemetry.cell_restores);
             let _ = trace_sink.record_span(
                 &trace_context.child(),
                 SpanRecord {
@@ -890,9 +968,20 @@ async fn dispatch_cell_host(
             .await?;
             let dispatch_started = Instant::now();
             let dispatch_started_at_ms = trace::now_ms();
-            let response = resident
+            let response = match resident
                 .dispatch_http(dispatch.request, dispatch.invocation)
-                .await?;
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    Telemetry::inc(&telemetry.cell_dispatch_errors);
+                    return Err(error.into());
+                }
+            };
+            Telemetry::inc(&telemetry.cell_dispatches);
+            if response.status >= 500 {
+                Telemetry::inc(&telemetry.cell_dispatch_errors);
+            }
             resident
                 .checkpoint_if_wal_exceeds(app.checkpoint_threshold_bytes)
                 .await?;
@@ -918,6 +1007,7 @@ async fn dispatch_cell_host(
                 },
             );
             if let Some(commit) = commit {
+                Telemetry::inc(&telemetry.cell_commits);
                 let _ = trace_sink.record_span(
                     &trace_context.child(),
                     SpanRecord {
@@ -938,7 +1028,11 @@ async fn dispatch_cell_host(
             let logs = resident.take_console_events();
             let release_started = Instant::now();
             let release_started_at_ms = trace::now_ms();
-            resident.release().await?;
+            if let Err(error) = resident.release().await {
+                Telemetry::inc(&telemetry.cell_release_errors);
+                return Err(error.into());
+            }
+            Telemetry::inc(&telemetry.cell_releases);
             let _ = trace_sink.record_span(
                 &trace_context.child(),
                 SpanRecord {
@@ -997,11 +1091,28 @@ async fn dispatch_websocket(
     let service_name = app.service.to_string();
     let request_id = uuid::Uuid::new_v4().to_string();
     let event_name = event.name();
+    let telemetry = Arc::clone(&app.telemetry);
+    match &event {
+        WebSocketEvent::Message(_) => Telemetry::inc(&telemetry.websocket_messages),
+        WebSocketEvent::Close(_) => Telemetry::inc(&telemetry.websocket_closes),
+    }
 
     let (dispatch, logs) = if uses_host(&app) {
-        dispatch_websocket_host(app, cell, event).await?
+        match dispatch_websocket_host(app, cell, event).await {
+            Ok(result) => result,
+            Err(error) => {
+                Telemetry::inc(&telemetry.websocket_errors);
+                return Err(error);
+            }
+        }
     } else {
-        dispatch_websocket_plain(app, cell, event).await?
+        match dispatch_websocket_plain(app, cell, event).await {
+            Ok(result) => result,
+            Err(error) => {
+                Telemetry::inc(&telemetry.websocket_errors);
+                return Err(error);
+            }
+        }
     };
 
     record_console(
@@ -1020,8 +1131,10 @@ async fn dispatch_websocket_plain(
     cell: CellId,
     event: WebSocketEvent,
 ) -> Result<(WebSocketDispatch, Vec<peren_runtime::WorkerLogEvent>), ProcessError> {
+    let telemetry = Arc::clone(&app.telemetry);
     app.node
         .restore_and_dispatch(cell, |input| async move {
+            Telemetry::inc(&telemetry.cell_restores);
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
@@ -1034,17 +1147,29 @@ async fn dispatch_websocket_plain(
                 app.environment,
             )
             .await?;
-            let dispatch = match event {
-                WebSocketEvent::Message(event) => {
-                    resident.dispatch_websocket_message(event).await?
+            let dispatch = match match event {
+                WebSocketEvent::Message(event) => resident.dispatch_websocket_message(event).await,
+                WebSocketEvent::Close(event) => resident.dispatch_websocket_close(event).await,
+            } {
+                Ok(dispatch) => dispatch,
+                Err(error) => {
+                    Telemetry::inc(&telemetry.cell_dispatch_errors);
+                    return Err(error.into());
                 }
-                WebSocketEvent::Close(event) => resident.dispatch_websocket_close(event).await?,
             };
+            Telemetry::inc(&telemetry.cell_dispatches);
             resident
                 .checkpoint_if_wal_exceeds(app.checkpoint_threshold_bytes)
                 .await?;
+            if resident.last_commit().is_some() {
+                Telemetry::inc(&telemetry.cell_commits);
+            }
             let logs = resident.take_console_events();
-            resident.release().await?;
+            if let Err(error) = resident.release().await {
+                Telemetry::inc(&telemetry.cell_release_errors);
+                return Err(error.into());
+            }
+            Telemetry::inc(&telemetry.cell_releases);
             Ok((dispatch, logs))
         })
         .await
@@ -1068,9 +1193,11 @@ async fn dispatch_websocket_host(
     let registry = Arc::clone(&app.registry);
     let node = app.node.clone();
     let limits = app.limits;
+    let telemetry = Arc::clone(&app.telemetry);
 
     app.node
         .restore_and_dispatch(cell, |input| async move {
+            Telemetry::inc(&telemetry.cell_restores);
             let path = input.path;
             let lease = input.lease;
             let store = input.repository;
@@ -1109,17 +1236,29 @@ async fn dispatch_websocket_host(
                 },
             )
             .await?;
-            let dispatch = match event {
-                WebSocketEvent::Message(event) => {
-                    resident.dispatch_websocket_message(event).await?
+            let dispatch = match match event {
+                WebSocketEvent::Message(event) => resident.dispatch_websocket_message(event).await,
+                WebSocketEvent::Close(event) => resident.dispatch_websocket_close(event).await,
+            } {
+                Ok(dispatch) => dispatch,
+                Err(error) => {
+                    Telemetry::inc(&telemetry.cell_dispatch_errors);
+                    return Err(error.into());
                 }
-                WebSocketEvent::Close(event) => resident.dispatch_websocket_close(event).await?,
             };
+            Telemetry::inc(&telemetry.cell_dispatches);
             resident
                 .checkpoint_if_wal_exceeds(app.checkpoint_threshold_bytes)
                 .await?;
+            if resident.last_commit().is_some() {
+                Telemetry::inc(&telemetry.cell_commits);
+            }
             let logs = resident.take_console_events();
-            resident.release().await?;
+            if let Err(error) = resident.release().await {
+                Telemetry::inc(&telemetry.cell_release_errors);
+                return Err(error.into());
+            }
+            Telemetry::inc(&telemetry.cell_releases);
             Ok((dispatch, logs))
         })
         .await
