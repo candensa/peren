@@ -3813,7 +3813,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "peren"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "peren-operator",
@@ -3825,7 +3825,7 @@ dependencies = [
 
 [[package]]
 name = "peren-bindings"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "hmac",
@@ -3839,7 +3839,7 @@ dependencies = [
 
 [[package]]
 name = "peren-cell"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "peren-bindings",
  "peren-primitives",
@@ -3855,7 +3855,7 @@ dependencies = [
 
 [[package]]
 name = "peren-config"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "cron",
@@ -3871,7 +3871,7 @@ dependencies = [
 
 [[package]]
 name = "peren-fleet"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "peren-primitives",
  "serde",
@@ -3882,7 +3882,7 @@ dependencies = [
 
 [[package]]
 name = "peren-migrate"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "hex",
  "peren-config",
@@ -3897,7 +3897,7 @@ dependencies = [
 
 [[package]]
 name = "peren-node"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -3941,7 +3941,7 @@ dependencies = [
 
 [[package]]
 name = "peren-operator"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "peren-config",
@@ -3960,7 +3960,7 @@ dependencies = [
 
 [[package]]
 name = "peren-primitives"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "hex",
  "serde",
@@ -3970,7 +3970,7 @@ dependencies = [
 
 [[package]]
 name = "peren-provider-object-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3992,7 +3992,7 @@ dependencies = [
 
 [[package]]
 name = "peren-provider-turso"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "fs2",
  "peren-bindings",
@@ -4010,7 +4010,7 @@ dependencies = [
 
 [[package]]
 name = "peren-queues"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-nats",
  "bytes",
@@ -4030,7 +4030,7 @@ dependencies = [
 
 [[package]]
 name = "peren-replication"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "peren-primitives",
  "peren-storage",
@@ -4040,7 +4040,7 @@ dependencies = [
 
 [[package]]
 name = "peren-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -4071,7 +4071,7 @@ dependencies = [
 
 [[package]]
 name = "peren-security"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64",
  "hmac",
@@ -4085,7 +4085,7 @@ dependencies = [
 
 [[package]]
 name = "peren-storage"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "peren-primitives",
  "rusqlite",
@@ -4097,7 +4097,7 @@ dependencies = [
 
 [[package]]
 name = "peren-testkit"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "tokio",
  "uuid",
@@ -4105,7 +4105,7 @@ dependencies = [
 
 [[package]]
 name = "peren-workflow"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "peren-primitives",
  "serde",
