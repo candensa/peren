@@ -1,6 +1,6 @@
 {
   "name": "@peren/vitest-plugin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Vitest plugin for running tests against a real Peren test-server.",
   "license": "Apache-2.0",
   "type": "module",
