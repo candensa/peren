@@ -649,12 +649,14 @@ async fn dispatch_service(
     let trace_context = parent_context.as_ref().map(TraceContext::child);
     let service_name = fetch.service.clone();
     let cell_id = cell(&target.scope, path);
+    let telemetry = Arc::clone(&host.telemetry);
     host.node
         .restore_and_dispatch(cell_id, |input| async move {
             let restore_source = match &input.restore.source {
                 crate::RestoreSource::Empty => "empty".to_string(),
                 crate::RestoreSource::Restored { .. } => "restored".to_string(),
             };
+            Telemetry::inc(&telemetry.cell_restores);
             record_lifecycle(
                 &trace,
                 trace_context.as_ref(),
@@ -707,7 +709,17 @@ async fn dispatch_service(
             )
             .await?;
             let dispatch_started = Instant::now();
-            let response = resident.dispatch_http(fetch.request, invocation).await?;
+            let response = match resident.dispatch_http(fetch.request, invocation).await {
+                Ok(response) => response,
+                Err(error) => {
+                    Telemetry::inc(&telemetry.cell_dispatch_errors);
+                    return Err(error.into());
+                }
+            };
+            Telemetry::inc(&telemetry.cell_dispatches);
+            if response.status >= 500 {
+                Telemetry::inc(&telemetry.cell_dispatch_errors);
+            }
             resident
                 .checkpoint_if_wal_exceeds(target.checkpoint_threshold_bytes)
                 .await?;
@@ -731,6 +743,7 @@ async fn dispatch_service(
                 )]),
             );
             if let Some(commit) = commit {
+                Telemetry::inc(&telemetry.cell_commits);
                 record_lifecycle(
                     &trace,
                     trace_context.as_ref(),
@@ -747,7 +760,11 @@ async fn dispatch_service(
                 );
             }
             let release_started = Instant::now();
-            resident.release().await?;
+            if let Err(error) = resident.release().await {
+                Telemetry::inc(&telemetry.cell_release_errors);
+                return Err(error.into());
+            }
+            Telemetry::inc(&telemetry.cell_releases);
             record_lifecycle(
                 &trace,
                 trace_context.as_ref(),
@@ -890,12 +907,14 @@ async fn dispatch_object(
     let trace_context = parent_context.as_ref().map(TraceContext::child);
     let service_name = service.clone();
     let cell_id = object_cell(&target.scope, &fetch.namespace, &fetch.id);
+    let telemetry = Arc::clone(&host.telemetry);
     host.node
         .restore_and_dispatch(cell_id, |input| async move {
             let restore_source = match &input.restore.source {
                 crate::RestoreSource::Empty => "empty".to_string(),
                 crate::RestoreSource::Restored { .. } => "restored".to_string(),
             };
+            Telemetry::inc(&telemetry.cell_restores);
             record_lifecycle(
                 &trace,
                 trace_context.as_ref(),
@@ -955,7 +974,17 @@ async fn dispatch_object(
                 &fetch.props,
             )?;
             let dispatch_started = Instant::now();
-            let response = resident.dispatch_http(fetch.request, invocation).await?;
+            let response = match resident.dispatch_http(fetch.request, invocation).await {
+                Ok(response) => response,
+                Err(error) => {
+                    Telemetry::inc(&telemetry.cell_dispatch_errors);
+                    return Err(error.into());
+                }
+            };
+            Telemetry::inc(&telemetry.cell_dispatches);
+            if response.status >= 500 {
+                Telemetry::inc(&telemetry.cell_dispatch_errors);
+            }
             resident
                 .checkpoint_if_wal_exceeds(target.checkpoint_threshold_bytes)
                 .await?;
@@ -982,6 +1011,7 @@ async fn dispatch_object(
                 ]),
             );
             if let Some(commit) = commit {
+                Telemetry::inc(&telemetry.cell_commits);
                 record_lifecycle(
                     &trace,
                     trace_context.as_ref(),
@@ -998,7 +1028,11 @@ async fn dispatch_object(
                 );
             }
             let release_started = Instant::now();
-            resident.release().await?;
+            if let Err(error) = resident.release().await {
+                Telemetry::inc(&telemetry.cell_release_errors);
+                return Err(error.into());
+            }
+            Telemetry::inc(&telemetry.cell_releases);
             record_lifecycle(
                 &trace,
                 trace_context.as_ref(),
@@ -1177,6 +1211,8 @@ impl DurableStorageHost for ProcessHost {
         );
         if result.is_ok() {
             Telemetry::inc(&self.telemetry.storage_commits);
+        } else {
+            Telemetry::inc(&self.telemetry.storage_commit_errors);
         }
         result
     }
@@ -1185,6 +1221,8 @@ impl DurableStorageHost for ProcessHost {
         let result = self.inner.rollback().await;
         if result.is_ok() {
             Telemetry::inc(&self.telemetry.storage_rollbacks);
+        } else {
+            Telemetry::inc(&self.telemetry.storage_rollback_errors);
         }
         result
     }

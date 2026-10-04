@@ -3,7 +3,7 @@ title: "Observability"
 description: "Use health, readiness, metrics, logs, and tail on a running Peren node."
 ---
 
-Observe a node through health endpoints, Prometheus metrics, local logs, local lifecycle traces, and optional OTLP trace export.
+Use health endpoints, Prometheus metrics, local logs, lifecycle traces, and optional OTLP export to understand what a running node is doing.
 
 <SystemDiagram name="observability" />
 
@@ -17,7 +17,7 @@ On configured listeners:
 | `/readyz` | Listener is ready for traffic. Returns 200 or 503. |
 | `/metrics` | Prometheus text exposition of process and runtime series. |
 
-An operator may scrape `/metrics` with Prometheus. That choice belongs to the operator's monitoring stack. Peren does not ship Grafana dashboards as a product feature.
+Prometheus can scrape `/metrics` from any listener that your monitoring stack can reach. Keep that path on a private listener or behind the same network controls you use for other node-level infrastructure.
 
 ```sh
 curl -sS http://127.0.0.1:8080/healthz

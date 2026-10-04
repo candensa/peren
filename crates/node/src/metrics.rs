@@ -3,7 +3,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
 };
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::admission::Snapshot as AdmissionSnapshot;
 
@@ -34,6 +34,16 @@ pub(crate) struct Telemetry {
     pub(crate) http_errors: AtomicU64,
     pub(crate) http_duration_ms: AtomicU64,
     pub(crate) http_duration: DurationHistogram,
+    pub(crate) worker_dispatches: AtomicU64,
+    pub(crate) worker_dispatch_errors: AtomicU64,
+    pub(crate) worker_dispatch_duration_ms: AtomicU64,
+    pub(crate) worker_dispatch_duration: DurationHistogram,
+    pub(crate) cell_restores: AtomicU64,
+    pub(crate) cell_dispatches: AtomicU64,
+    pub(crate) cell_dispatch_errors: AtomicU64,
+    pub(crate) cell_commits: AtomicU64,
+    pub(crate) cell_releases: AtomicU64,
+    pub(crate) cell_release_errors: AtomicU64,
     pub(crate) queue_ticks: AtomicU64,
     pub(crate) queue_leases: AtomicU64,
     pub(crate) queue_messages: AtomicU64,
@@ -42,9 +52,11 @@ pub(crate) struct Telemetry {
     pub(crate) queue_dispatch_duration_ms: AtomicU64,
     pub(crate) queue_dispatch_duration: DurationHistogram,
     pub(crate) storage_commits: AtomicU64,
+    pub(crate) storage_commit_errors: AtomicU64,
     pub(crate) storage_commit_duration_ms: AtomicU64,
     pub(crate) storage_commit_duration: DurationHistogram,
     pub(crate) storage_rollbacks: AtomicU64,
+    pub(crate) storage_rollback_errors: AtomicU64,
     pub(crate) queue_sends: AtomicU64,
     pub(crate) queue_send_errors: AtomicU64,
     pub(crate) queue_send_duration_ms: AtomicU64,
@@ -82,6 +94,9 @@ pub(crate) struct Telemetry {
     pub(crate) object_duration_ms: AtomicU64,
     pub(crate) object_duration: DurationHistogram,
     pub(crate) websocket_sessions: AtomicU64,
+    pub(crate) websocket_messages: AtomicU64,
+    pub(crate) websocket_closes: AtomicU64,
+    pub(crate) websocket_errors: AtomicU64,
 }
 
 pub(crate) struct DurationHistogram {
@@ -250,6 +265,68 @@ peren_placement_available {}\n",
         Telemetry::get(&telemetry.http_duration_ms),
         &telemetry.http_duration,
     );
+    duration_seconds(
+        &mut output,
+        "peren_http_request_duration_seconds",
+        "HTTP request wall time in seconds.",
+        Telemetry::get(&telemetry.http_duration_ms),
+        &telemetry.http_duration,
+    );
+    counter(
+        &mut output,
+        "peren_worker_dispatches_total",
+        "Worker fetch dispatches completed by this node.",
+        Telemetry::get(&telemetry.worker_dispatches),
+    );
+    counter(
+        &mut output,
+        "peren_worker_dispatch_errors_total",
+        "Worker fetch dispatches that returned an error response or failed.",
+        Telemetry::get(&telemetry.worker_dispatch_errors),
+    );
+    duration_seconds(
+        &mut output,
+        "peren_worker_dispatch_duration_seconds",
+        "Worker fetch dispatch wall time in seconds.",
+        Telemetry::get(&telemetry.worker_dispatch_duration_ms),
+        &telemetry.worker_dispatch_duration,
+    );
+    counter(
+        &mut output,
+        "peren_cell_restores_total",
+        "Cell restore phases completed before dispatch.",
+        Telemetry::get(&telemetry.cell_restores),
+    );
+    counter(
+        &mut output,
+        "peren_cell_dispatches_total",
+        "Cell dispatch phases completed.",
+        Telemetry::get(&telemetry.cell_dispatches),
+    );
+    counter(
+        &mut output,
+        "peren_cell_dispatch_errors_total",
+        "Cell dispatch phases that returned an error response or failed.",
+        Telemetry::get(&telemetry.cell_dispatch_errors),
+    );
+    counter(
+        &mut output,
+        "peren_cell_commits_total",
+        "Cell dispatches that published a durable storage commit.",
+        Telemetry::get(&telemetry.cell_commits),
+    );
+    counter(
+        &mut output,
+        "peren_cell_releases_total",
+        "Cell release phases completed successfully.",
+        Telemetry::get(&telemetry.cell_releases),
+    );
+    counter(
+        &mut output,
+        "peren_cell_release_errors_total",
+        "Cell release phases that failed.",
+        Telemetry::get(&telemetry.cell_release_errors),
+    );
     counter(
         &mut output,
         "peren_queue_ticks_total",
@@ -287,11 +364,24 @@ peren_placement_available {}\n",
         Telemetry::get(&telemetry.queue_dispatch_duration_ms),
         &telemetry.queue_dispatch_duration,
     );
+    duration_seconds(
+        &mut output,
+        "peren_queue_dispatch_duration_seconds",
+        "Queue dispatch wall time in seconds.",
+        Telemetry::get(&telemetry.queue_dispatch_duration_ms),
+        &telemetry.queue_dispatch_duration,
+    );
     counter(
         &mut output,
         "peren_storage_commits_total",
         "Durable storage commits completed through the node host.",
         Telemetry::get(&telemetry.storage_commits),
+    );
+    counter(
+        &mut output,
+        "peren_storage_commit_errors_total",
+        "Durable storage commit failures through the node host.",
+        Telemetry::get(&telemetry.storage_commit_errors),
     );
     duration(
         &mut output,
@@ -300,11 +390,24 @@ peren_placement_available {}\n",
         Telemetry::get(&telemetry.storage_commit_duration_ms),
         &telemetry.storage_commit_duration,
     );
+    duration_seconds(
+        &mut output,
+        "peren_storage_commit_duration_seconds",
+        "Durable storage commit wall time in seconds.",
+        Telemetry::get(&telemetry.storage_commit_duration_ms),
+        &telemetry.storage_commit_duration,
+    );
     counter(
         &mut output,
         "peren_storage_rollbacks_total",
         "Durable storage rollbacks completed through the node host.",
         Telemetry::get(&telemetry.storage_rollbacks),
+    );
+    counter(
+        &mut output,
+        "peren_storage_rollback_errors_total",
+        "Durable storage rollback failures through the node host.",
+        Telemetry::get(&telemetry.storage_rollback_errors),
     );
     counter(
         &mut output,
@@ -322,6 +425,13 @@ peren_placement_available {}\n",
         &mut output,
         "peren_queue_send_duration_ms",
         "Worker queue send wall time in milliseconds.",
+        Telemetry::get(&telemetry.queue_send_duration_ms),
+        &telemetry.queue_send_duration,
+    );
+    duration_seconds(
+        &mut output,
+        "peren_queue_send_duration_seconds",
+        "Worker queue send wall time in seconds.",
         Telemetry::get(&telemetry.queue_send_duration_ms),
         &telemetry.queue_send_duration,
     );
@@ -344,6 +454,13 @@ peren_placement_available {}\n",
         Telemetry::get(&telemetry.r2_duration_ms),
         &telemetry.r2_duration,
     );
+    duration_seconds(
+        &mut output,
+        "peren_r2_duration_seconds",
+        "R2 binding operation wall time in seconds.",
+        Telemetry::get(&telemetry.r2_duration_ms),
+        &telemetry.r2_duration,
+    );
     counter(
         &mut output,
         "peren_kv_operations_total",
@@ -360,6 +477,13 @@ peren_placement_available {}\n",
         &mut output,
         "peren_kv_duration_ms",
         "KV binding operation wall time in milliseconds.",
+        Telemetry::get(&telemetry.kv_duration_ms),
+        &telemetry.kv_duration,
+    );
+    duration_seconds(
+        &mut output,
+        "peren_kv_duration_seconds",
+        "KV binding operation wall time in seconds.",
         Telemetry::get(&telemetry.kv_duration_ms),
         &telemetry.kv_duration,
     );
@@ -382,6 +506,13 @@ peren_placement_available {}\n",
         Telemetry::get(&telemetry.d1_duration_ms),
         &telemetry.d1_duration,
     );
+    duration_seconds(
+        &mut output,
+        "peren_d1_duration_seconds",
+        "D1 SQL query wall time in seconds.",
+        Telemetry::get(&telemetry.d1_duration_ms),
+        &telemetry.d1_duration,
+    );
     counter(
         &mut output,
         "peren_cache_operations_total",
@@ -398,6 +529,13 @@ peren_placement_available {}\n",
         &mut output,
         "peren_cache_duration_ms",
         "Cache binding operation wall time in milliseconds.",
+        Telemetry::get(&telemetry.cache_duration_ms),
+        &telemetry.cache_duration,
+    );
+    duration_seconds(
+        &mut output,
+        "peren_cache_duration_seconds",
+        "Cache binding operation wall time in seconds.",
         Telemetry::get(&telemetry.cache_duration_ms),
         &telemetry.cache_duration,
     );
@@ -420,6 +558,13 @@ peren_placement_available {}\n",
         Telemetry::get(&telemetry.ai_duration_ms),
         &telemetry.ai_duration,
     );
+    duration_seconds(
+        &mut output,
+        "peren_ai_duration_seconds",
+        "AI binding call wall time in seconds.",
+        Telemetry::get(&telemetry.ai_duration_ms),
+        &telemetry.ai_duration,
+    );
     counter(
         &mut output,
         "peren_service_fetches_total",
@@ -436,6 +581,13 @@ peren_placement_available {}\n",
         &mut output,
         "peren_service_duration_ms",
         "Service binding fetch wall time in milliseconds.",
+        Telemetry::get(&telemetry.service_duration_ms),
+        &telemetry.service_duration,
+    );
+    duration_seconds(
+        &mut output,
+        "peren_service_duration_seconds",
+        "Service binding fetch wall time in seconds.",
         Telemetry::get(&telemetry.service_duration_ms),
         &telemetry.service_duration,
     );
@@ -458,6 +610,13 @@ peren_placement_available {}\n",
         Telemetry::get(&telemetry.outbound_duration_ms),
         &telemetry.outbound_duration,
     );
+    duration_seconds(
+        &mut output,
+        "peren_outbound_duration_seconds",
+        "Host-gated outbound fetch wall time in seconds.",
+        Telemetry::get(&telemetry.outbound_duration_ms),
+        &telemetry.outbound_duration,
+    );
     counter(
         &mut output,
         "peren_object_fetches_total",
@@ -477,6 +636,13 @@ peren_placement_available {}\n",
         Telemetry::get(&telemetry.object_duration_ms),
         &telemetry.object_duration,
     );
+    duration_seconds(
+        &mut output,
+        "peren_object_duration_seconds",
+        "Durable Object binding fetch wall time in seconds.",
+        Telemetry::get(&telemetry.object_duration_ms),
+        &telemetry.object_duration,
+    );
     counter(
         &mut output,
         "peren_websocket_sessions_total",
@@ -488,6 +654,24 @@ peren_placement_available {}\n",
         "# HELP peren_websocket_sessions_registered WebSocket sessions tracked by the host registry.\n\
 # TYPE peren_websocket_sessions_registered gauge\n\
 peren_websocket_sessions_registered {websocket_active}\n"
+    );
+    counter(
+        &mut output,
+        "peren_websocket_messages_total",
+        "WebSocket messages received from clients and dispatched to Workers.",
+        Telemetry::get(&telemetry.websocket_messages),
+    );
+    counter(
+        &mut output,
+        "peren_websocket_closes_total",
+        "WebSocket close events observed by the host bridge.",
+        Telemetry::get(&telemetry.websocket_closes),
+    );
+    counter(
+        &mut output,
+        "peren_websocket_errors_total",
+        "WebSocket bridge or dispatch failures.",
+        Telemetry::get(&telemetry.websocket_errors),
     );
     output
 }
@@ -512,6 +696,25 @@ fn duration(output: &mut String, name: &str, help: &str, sum: u64, histogram: &D
         let count = buckets[index];
         let _ = writeln!(output, "{name}_bucket{{le=\"{bound}\"}} {count}");
     }
+    let _ = writeln!(output, "{name}_bucket{{le=\"+Inf\"}} {infinite}");
+    let _ = write!(output, "{name}_sum {sum}\n{name}_count {infinite}\n");
+}
+
+fn duration_seconds(
+    output: &mut String,
+    name: &str,
+    help: &str,
+    sum_ms: u64,
+    histogram: &DurationHistogram,
+) {
+    let _ = write!(output, "# HELP {name} {help}\n# TYPE {name} histogram\n");
+    let (buckets, infinite) = histogram.counts();
+    for (index, bound) in DURATION_BUCKETS_MS.iter().enumerate() {
+        let count = buckets[index];
+        let seconds = Duration::from_millis(*bound).as_secs_f64();
+        let _ = writeln!(output, "{name}_bucket{{le=\"{seconds}\"}} {count}");
+    }
+    let sum = Duration::from_millis(sum_ms).as_secs_f64();
     let _ = writeln!(output, "{name}_bucket{{le=\"+Inf\"}} {infinite}");
     let _ = write!(output, "{name}_sum {sum}\n{name}_count {infinite}\n");
 }
@@ -549,6 +752,19 @@ mod tests {
         telemetry.outbound_errors.store(1, Ordering::Relaxed);
         telemetry.outbound_duration_ms.store(11, Ordering::Relaxed);
         telemetry.outbound_duration.observe(11);
+        telemetry.worker_dispatches.store(4, Ordering::Relaxed);
+        telemetry
+            .worker_dispatch_duration_ms
+            .store(21, Ordering::Relaxed);
+        telemetry.worker_dispatch_duration.observe(21);
+        telemetry.cell_restores.store(4, Ordering::Relaxed);
+        telemetry.cell_dispatches.store(4, Ordering::Relaxed);
+        telemetry.cell_commits.store(3, Ordering::Relaxed);
+        telemetry.cell_releases.store(4, Ordering::Relaxed);
+        telemetry.storage_commit_errors.store(1, Ordering::Relaxed);
+        telemetry.websocket_messages.store(6, Ordering::Relaxed);
+        telemetry.websocket_closes.store(2, Ordering::Relaxed);
+        telemetry.websocket_errors.store(1, Ordering::Relaxed);
         let metrics = Metrics {
             listener: Arc::from("public"),
             listeners: 1,
@@ -573,5 +789,16 @@ mod tests {
         assert!(output.contains("peren_outbound_errors_total 1"));
         assert!(output.contains("peren_outbound_duration_ms_total 11"));
         assert!(output.contains("peren_placement_weight 100"));
+        assert!(output.contains("peren_worker_dispatches_total 4"));
+        assert!(output.contains("peren_worker_dispatch_duration_seconds_bucket{le=\"0.025\"} 1"));
+        assert!(output.contains("peren_worker_dispatch_duration_seconds_count 1"));
+        assert!(output.contains("peren_cell_restores_total 4"));
+        assert!(output.contains("peren_cell_dispatches_total 4"));
+        assert!(output.contains("peren_cell_commits_total 3"));
+        assert!(output.contains("peren_cell_releases_total 4"));
+        assert!(output.contains("peren_storage_commit_errors_total 1"));
+        assert!(output.contains("peren_websocket_messages_total 6"));
+        assert!(output.contains("peren_websocket_closes_total 2"));
+        assert!(output.contains("peren_websocket_errors_total 1"));
     }
 }

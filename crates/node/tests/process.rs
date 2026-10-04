@@ -867,6 +867,10 @@ async fn public_listener_resolves_stable_store_secret_declaration() {
     process.shutdown().await.unwrap();
 }
 
+fn assert_metric_at_least(output: &str, name: &str, minimum: u64) {
+    assert!(metric::value(output, name) >= minimum, "{output}");
+}
+
 #[tokio::test]
 async fn metrics_endpoint_reports_safe_process_state() {
     let worker = TestWorker::from_source(
@@ -926,22 +930,17 @@ async fn metrics_endpoint_reports_safe_process_state() {
         "{response}"
     );
     assert_eq!(metric::value(&response, "peren_admission_refused_total"), 0);
-    assert!(
-        metric::value(&response, "peren_http_requests_total") >= 2,
-        "{response}"
-    );
-    assert!(
-        metric::value(&response, "peren_storage_commits_total") >= 2,
-        "{response}"
-    );
-    assert!(
-        metric::value(&response, "peren_queue_sends_total") >= 1,
-        "{response}"
-    );
-    assert!(
-        metric::value(&response, "peren_queue_ticks_total") >= 1,
-        "{response}"
-    );
+    assert_metric_at_least(&response, "peren_http_requests_total", 2);
+    assert_metric_at_least(&response, "peren_worker_dispatches_total", 2);
+    assert_metric_at_least(&response, "peren_cell_restores_total", 2);
+    assert_metric_at_least(&response, "peren_cell_dispatches_total", 2);
+    assert_metric_at_least(&response, "peren_cell_releases_total", 2);
+    assert_metric_at_least(&response, "peren_storage_commits_total", 2);
+    assert!(response.contains("peren_http_request_duration_seconds_bucket"));
+    assert!(response.contains("peren_worker_dispatch_duration_seconds_bucket"));
+    assert!(response.contains("peren_storage_commit_duration_seconds_bucket"));
+    assert_metric_at_least(&response, "peren_queue_sends_total", 1);
+    assert_metric_at_least(&response, "peren_queue_ticks_total", 1);
     assert!(
         response.contains("peren_http_duration_ms_total"),
         "{response}"
