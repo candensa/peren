@@ -56,6 +56,7 @@ impl OwnershipLease for Lease {
 
 struct Repository {
     reject_publication: bool,
+    reject_checkpoint: bool,
     image: Arc<Mutex<Option<ReplicaImage>>>,
     prunes: Arc<AtomicUsize>,
 }
@@ -109,7 +110,11 @@ impl ReplicaRepository for Repository {
         _revision: peren_primitives::StorageRevision,
         _database: &[u8],
     ) -> Result<(), RepositoryError> {
-        Ok(())
+        if self.reject_checkpoint {
+            Err(RepositoryError::Unavailable)
+        } else {
+            Ok(())
+        }
     }
 
     async fn prune(&self, _cell: CellId, _retain: NonZeroUsize) -> Result<usize, RepositoryError> {
@@ -131,6 +136,16 @@ fn lease(fail_at: usize) -> Lease {
 fn repository(reject_publication: bool) -> Repository {
     Repository {
         reject_publication,
+        reject_checkpoint: false,
+        image: Arc::new(Mutex::new(None)),
+        prunes: Arc::new(AtomicUsize::new(0)),
+    }
+}
+
+fn repository_rejecting_checkpoint() -> Repository {
+    Repository {
+        reject_publication: false,
+        reject_checkpoint: true,
         image: Arc::new(Mutex::new(None)),
         prunes: Arc::new(AtomicUsize::new(0)),
     }

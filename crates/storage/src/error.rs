@@ -30,4 +30,6 @@ pub enum StorageError {
     ReadReplica(#[source] std::io::Error),
     #[error("SQLite WAL has an invalid byte layout")]
     MalformedWal,
+    #[error("SQLite WAL checkpoint could not complete because readers are active")]
+    CheckpointBusy,
 }

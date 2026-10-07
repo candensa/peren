@@ -561,8 +561,14 @@ impl CellStorage {
     }
 
     pub fn checkpoint(&mut self) -> Result<CheckpointBytes, StorageError> {
-        self.connection
-            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
+        let busy = self
+            .connection
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                row.get::<_, i64>(0)
+            })?;
+        if busy != 0 {
+            return Err(StorageError::CheckpointBusy);
+        }
         replica::checkpoint(&self.path, self.revision)
     }
 
