@@ -255,6 +255,161 @@ async fn durable_object_state_exposes_id_props_exports_and_decoded_transactions(
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn rpc_aggregate_results_are_disposable() {
+    let mut runtime = WorkerRuntime::load_with_capabilities(
+        bundle(
+            "export default { async fetch(request) {
+                const target = {
+                  record() { return { value: 'example' }; },
+                  array() { return ['example']; },
+                  frozen() { return Object.freeze({ value: 'frozen' }); },
+                  asyncOnly() {
+                    return { value: 'async', [Symbol.asyncDispose]() {} };
+                  },
+                  primitive() { return 1; },
+                };
+                const ctx = new DurableObjectState(Peren.storage, {}, { exports: target });
+                const kind = new URL(request.url).searchParams.get('kind') ?? 'record';
+                const result = await ctx.exports[kind]();
+                const hasDispose = typeof result?.[Symbol.dispose] === 'function';
+                const hasAsyncDispose = typeof result?.[Symbol.asyncDispose] === 'function';
+                const descriptor = result && typeof result === 'object'
+                  ? Object.getOwnPropertyDescriptor(result, Symbol.dispose)
+                  : undefined;
+                let usingResult = 'skipped';
+                if (result !== null && typeof result === 'object') {
+                  if (hasDispose) {
+                    let disposed = false;
+                    let identity = false;
+                    {
+                      result[Symbol.dispose] = () => { disposed = true; };
+                      using disposable = result;
+                      identity = disposable.value === result.value;
+                    }
+                    usingResult = identity && disposed ? 'ok' : 'changed';
+                  } else {
+                    usingResult = 'async-only';
+                  }
+                }
+                return Response.json({
+                  result,
+                  hasDispose,
+                  hasAsyncDispose,
+                  writable: descriptor?.writable ?? null,
+                  ownDispose: Object.hasOwn(result ?? {}, Symbol.dispose),
+                  using: usingResult,
+                });
+              } };",
+        ),
+        limits(),
+        WorkerEnvironment::default(),
+        Capabilities {
+            storage: Arc::new(SqlHost::new()),
+            fetch: None,
+            queue: None,
+            r2: None,
+            service: None,
+            durable: None,
+            cache: None,
+            kv: None,
+            ai: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    for (kind, expected) in rpc_disposable_cases() {
+        assert_rpc_disposable_case(&mut runtime, kind, expected).await;
+    }
+}
+
+fn rpc_disposable_cases() -> [(&'static str, serde_json::Value); 5] {
+    [
+        (
+            "record",
+            serde_json::json!({
+                "result": { "value": "example" },
+                "hasDispose": true,
+                "hasAsyncDispose": false,
+                "writable": true,
+                "ownDispose": true,
+                "using": "ok",
+            }),
+        ),
+        (
+            "array",
+            serde_json::json!({
+                "result": ["example"],
+                "hasDispose": true,
+                "hasAsyncDispose": false,
+                "writable": true,
+                "ownDispose": true,
+                "using": "ok",
+            }),
+        ),
+        (
+            "frozen",
+            serde_json::json!({
+                "result": { "value": "frozen" },
+                "hasDispose": true,
+                "hasAsyncDispose": false,
+                "writable": null,
+                "ownDispose": false,
+                "using": "ok",
+            }),
+        ),
+        (
+            "asyncOnly",
+            serde_json::json!({
+                "result": { "value": "async" },
+                "hasDispose": false,
+                "hasAsyncDispose": true,
+                "writable": null,
+                "ownDispose": false,
+                "using": "async-only",
+            }),
+        ),
+        (
+            "primitive",
+            serde_json::json!({
+                "result": 1,
+                "hasDispose": false,
+                "hasAsyncDispose": false,
+                "writable": null,
+                "ownDispose": false,
+                "using": "skipped",
+            }),
+        ),
+    ]
+}
+
+async fn assert_rpc_disposable_case(
+    runtime: &mut WorkerRuntime,
+    kind: &str,
+    expected: serde_json::Value,
+) {
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: format!("https://worker.invalid/rpc?kind={kind}"),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status, 200);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        expected
+    );
+}
+
 #[tokio::test]
 async fn durable_object_facets_expose_scoped_rpc_storage_abort_and_delete() {
     let mut runtime = WorkerRuntime::load_with_capabilities(

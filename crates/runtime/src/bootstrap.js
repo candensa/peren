@@ -1,7 +1,7 @@
 // Generated from crates/runtime/src/bootstrap/*.js. Edit those files and rebuild the checked-in bundle.
 import { core, primordials } from "ext:core/mod.js";
 
-const { ArrayFrom, ObjectCreate, ObjectDefineProperties, ObjectFreeze, PromiseAll, PromiseResolve, Uint8Array } = primordials;
+const { ArrayFrom, ObjectCreate, ObjectDefineProperties, ObjectDefineProperty, ObjectFreeze, ObjectIsExtensible, PromiseAll, PromiseResolve, Uint8Array } = primordials;
 const event = core.loadExtScript("ext:deno_web/02_event.js");
 const exception = core.loadExtScript("ext:deno_web/01_dom_exception.js");
 const abort = core.loadExtScript("ext:deno_web/03_abort_signal.js");
@@ -94,7 +94,6 @@ const consoleCompat = ObjectFreeze({
 const navigatorCompat = ObjectFreeze({
   userAgent: "Peren/0.1",
 });
-
 const cryptoBytes = (length) => new Uint8Array(core.ops.op_crypto_random(length));
 
 const bufferSource = (value, name) => {
@@ -1648,7 +1647,35 @@ async function readRpcResponse(response) {
     const message = payload?.error?.message ?? payload?.error ?? `RPC call failed with status ${response.status}`;
     throw new Error(String(message));
   }
-  return payload?.value;
+  return disposableRpcValue(payload?.value);
+}
+
+function disposableRpcValue(value) {
+  if ((typeof value !== "object" && typeof value !== "function") || value === null) return value;
+  if (typeof value[Symbol.dispose] === "function") return value;
+  if (typeof value[Symbol.asyncDispose] === "function") return value;
+  if (!ObjectIsExtensible(value)) {
+    let dispose = () => {};
+    return new Proxy(value, {
+      get(target, property, receiver) {
+        if (property === Symbol.dispose) return dispose;
+        return Reflect.get(target, property, receiver);
+      },
+      set(target, property, next, receiver) {
+        if (property === Symbol.dispose) {
+          dispose = next;
+          return true;
+        }
+        return Reflect.set(target, property, next, receiver);
+      },
+    });
+  }
+  ObjectDefineProperty(value, Symbol.dispose, {
+    configurable: true,
+    writable: true,
+    value() {},
+  });
+  return value;
 }
 
 function rpcProxy(target, invoke) {
@@ -1660,7 +1687,7 @@ function rpcProxy(target, invoke) {
         return typeof member === "function" ? member.bind(receiver) : member;
       }
       if (property === "then") return undefined;
-      return async (...args) => await invoke(property, args);
+      return async (...args) => disposableRpcValue(await invoke(property, args));
     },
   });
 }
