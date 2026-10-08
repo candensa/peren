@@ -39,7 +39,7 @@ function outboundBinding(binding) {
       const request = input instanceof Request ? input : new Request(input, init);
       const host = new URL(request.url).host;
       if (!allowed.has(host)) throw new TypeError(`outbound host ${host} is not allowed by this binding`);
-      return await outboundFetch(request);
+      return await outboundFetch(request, init);
     },
   });
 }
@@ -122,7 +122,7 @@ const serviceBinding = (service) => {
   const binding = {
     async fetch(input, init = {}) {
       const request = new Request(input, init);
-      const body = request.body === null ? [] : ArrayFrom(new Uint8Array(await request.arrayBuffer()));
+      const body = await requestBodyBytes(request);
       const response = await core.ops.op_service_fetch({
         service,
         request: {
@@ -147,4 +147,3 @@ globalThis.DurableObjectState = DurableObjectState;
 globalThis.RpcTarget = RpcTarget;
 globalThis.WebSocketRequestResponsePair = WebSocketRequestResponsePair;
 globalThis.WorkerEntrypoint = WorkerEntrypoint;
-

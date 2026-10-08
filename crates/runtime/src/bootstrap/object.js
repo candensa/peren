@@ -414,7 +414,7 @@ class DurableObjectStub {
   }
   async fetch(input, init = {}) {
     const request = new Request(input, init);
-    const body = request.body === null ? [] : ArrayFrom(new Uint8Array(await request.arrayBuffer()));
+    const body = await requestBodyBytes(request);
     const response = await core.ops.op_durable_object_fetch({
       namespace: this.id.namespace,
       id: this.id.value,

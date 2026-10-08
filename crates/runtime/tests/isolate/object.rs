@@ -123,6 +123,143 @@ async fn durable_object_stub_fetch_carries_startup_props() {
     );
 }
 
+#[tokio::test]
+async fn durable_object_stub_fetch_refuses_aborted_request_before_host_call() {
+    let bundle = bundle(
+        r"export default { async fetch(_request, env) {
+              const id = env.ROOMS.idFromName('lobby');
+              const stub = env.ROOMS.get(id);
+              const controller = new AbortController();
+              controller.abort(new DOMException('stopped', 'AbortError'));
+              try {
+                await stub.fetch('https://room.internal/message', { signal: controller.signal });
+                return new Response('resolved');
+              } catch (error) {
+                return Response.json({ name: error.name, message: error.message });
+              }
+            } };",
+    );
+    let durable = Arc::new(DurableHost {
+        requests: Mutex::new(Vec::new()),
+    });
+    let env = WorkerEnvironment::new(BTreeMap::from([(
+        "__perenBindings".to_string(),
+        r#"{"ROOMS":{"type":"durable_object_namespace","className":"Room"}}"#.to_string(),
+    )]));
+    let mut runtime = WorkerRuntime::load_with_capabilities(
+        bundle,
+        limits(),
+        env,
+        Capabilities {
+            storage: Arc::new(Host::default()),
+            fetch: None,
+            queue: None,
+            r2: None,
+            service: None,
+            durable: Some(durable.clone()),
+            cache: None,
+            kv: None,
+            ai: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.test/abort".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({ "name": "AbortError", "message": "stopped" })
+    );
+    assert!(durable.requests.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn durable_object_stub_fetch_aborts_while_reading_streaming_body() {
+    let bundle = bundle(
+        r"export default { async fetch(_request, env) {
+              const id = env.ROOMS.idFromName('lobby');
+              const stub = env.ROOMS.get(id);
+              const body = new ReadableStream({
+                start(controller) {
+                  controller.enqueue(new Uint8Array([1]));
+                },
+                cancel(reason) {
+                  globalThis.cancelled = reason.name;
+                },
+              });
+              try {
+                await stub.fetch('https://room.internal/message', {
+                  method: 'POST',
+                  body,
+                  duplex: 'half',
+                  signal: AbortSignal.timeout(10),
+                });
+                return new Response('resolved');
+              } catch (error) {
+                return Response.json({ name: error.name, cancelled: globalThis.cancelled });
+              }
+            } };",
+    );
+    let durable = Arc::new(DurableHost {
+        requests: Mutex::new(Vec::new()),
+    });
+    let env = WorkerEnvironment::new(BTreeMap::from([(
+        "__perenBindings".to_string(),
+        r#"{"ROOMS":{"type":"durable_object_namespace","className":"Room"}}"#.to_string(),
+    )]));
+    let mut runtime = WorkerRuntime::load_with_capabilities(
+        bundle,
+        limits(),
+        env,
+        Capabilities {
+            storage: Arc::new(Host::default()),
+            fetch: None,
+            queue: None,
+            r2: None,
+            service: None,
+            durable: Some(durable.clone()),
+            cache: None,
+            kv: None,
+            ai: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.test/abort-body".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({ "name": "TimeoutError", "cancelled": "TimeoutError" })
+    );
+    assert!(durable.requests.lock().await.is_empty());
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn durable_object_namespace_exposes_ids_and_stubs() {
     let mut values = BTreeMap::new();
