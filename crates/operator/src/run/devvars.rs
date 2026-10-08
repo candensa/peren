@@ -128,7 +128,9 @@ fn load_wrangler(
         if !path.exists() {
             continue;
         }
-        for (name, value) in read_vars_file(&path)? {
+        let parsed = read_wrangler_dotenv_file(&path)?;
+        report.filtered += parsed.filtered;
+        for (name, value) in parsed.values {
             if is_wrangler_tool_variable(&name) {
                 report.filtered += 1;
                 continue;
@@ -145,7 +147,39 @@ fn read_vars_file(path: &Path) -> Result<BTreeMap<String, String>, DevVarsError>
         path: path.to_path_buf(),
         source,
     })?;
-    parse(path, &content)
+    parse_with_options(path, &content, ParseOptions::strict()).map(|parsed| parsed.values)
+}
+
+fn read_wrangler_dotenv_file(path: &Path) -> Result<ParsedVars, DevVarsError> {
+    let content = std::fs::read_to_string(path).map_err(|source| DevVarsError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    parse_with_options(path, &content, ParseOptions::wrangler_dotenv())
+}
+
+struct ParsedVars {
+    values: BTreeMap<String, String>,
+    filtered: usize,
+}
+
+#[derive(Clone, Copy)]
+struct ParseOptions {
+    skip_invalid_names: bool,
+}
+
+impl ParseOptions {
+    const fn strict() -> Self {
+        Self {
+            skip_invalid_names: false,
+        }
+    }
+
+    const fn wrangler_dotenv() -> Self {
+        Self {
+            skip_invalid_names: true,
+        }
+    }
 }
 
 fn wrangler_dev_var_candidates(base: &Path, environment: Option<&str>) -> Vec<PathBuf> {
@@ -180,12 +214,29 @@ fn is_wrangler_tool_variable(name: &str) -> bool {
         .any(|prefix| name.starts_with(prefix))
 }
 
+#[cfg(test)]
 fn parse(path: &Path, content: &str) -> Result<BTreeMap<String, String>, DevVarsError> {
+    parse_with_options(path, content, ParseOptions::strict()).map(|parsed| parsed.values)
+}
+
+fn parse_with_options(
+    path: &Path,
+    content: &str,
+    options: ParseOptions,
+) -> Result<ParsedVars, DevVarsError> {
     let mut values = BTreeMap::new();
-    for (index, raw) in content.lines().enumerate() {
-        let line = raw.trim();
+    let mut filtered = 0;
+    let lines = content.lines().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < lines.len() {
+        let raw = lines[index];
+        let mut line = raw.trim();
         if line.is_empty() || line.starts_with('#') {
+            index += 1;
             continue;
+        }
+        if let Some(exported) = line.strip_prefix("export ") {
+            line = exported.trim_start();
         }
         let (name, value) = line.split_once('=').ok_or_else(|| DevVarsError::Entry {
             path: path.to_path_buf(),
@@ -193,19 +244,88 @@ fn parse(path: &Path, content: &str) -> Result<BTreeMap<String, String>, DevVars
             reason: "expected KEY=value",
         })?;
         let name = name.trim();
-        if !valid_name(name) {
+        let valid_name = valid_name(name);
+        if !valid_name && !options.skip_invalid_names {
             return Err(DevVarsError::Entry {
                 path: path.to_path_buf(),
                 line: index + 1,
                 reason: "invalid variable name",
             });
         }
-        values.insert(
-            name.to_string(),
-            parse_value(path, value.trim(), index + 1)?,
-        );
+        let start = index + 1;
+        let mut value = value.trim_start().to_string();
+        if let Some(quote) = opening_quote(&value) {
+            while quoted_value_end(value.trim_end(), quote).is_none() {
+                index += 1;
+                let Some(next) = lines.get(index) else {
+                    return Err(DevVarsError::Entry {
+                        path: path.to_path_buf(),
+                        line: start,
+                        reason: "unterminated quoted value",
+                    });
+                };
+                value.push('\n');
+                value.push_str(next);
+            }
+            value = quoted_segment(path, &value, quote, start)?;
+        }
+        if !valid_name {
+            filtered += 1;
+            index += 1;
+            continue;
+        }
+        values.insert(name.to_string(), parse_value(path, value.trim(), start)?);
+        index += 1;
     }
-    Ok(values)
+    Ok(ParsedVars { values, filtered })
+}
+
+fn opening_quote(value: &str) -> Option<char> {
+    match value.chars().next() {
+        Some(quote @ ('"' | '\'')) => Some(quote),
+        _ => None,
+    }
+}
+
+fn quoted_value_end(value: &str, quote: char) -> Option<usize> {
+    value.char_indices().skip(1).find_map(|(index, character)| {
+        (character == quote && (quote == '\'' || !escaped_at(value, index))).then_some(index)
+    })
+}
+
+fn escaped_at(value: &str, index: usize) -> bool {
+    value[..index]
+        .chars()
+        .rev()
+        .take_while(|character| *character == '\\')
+        .count()
+        % 2
+        == 1
+}
+
+fn quoted_segment(
+    path: &Path,
+    value: &str,
+    quote: char,
+    line: usize,
+) -> Result<String, DevVarsError> {
+    let trimmed = value.trim_end();
+    let Some(end) = quoted_value_end(trimmed, quote) else {
+        return Err(DevVarsError::Entry {
+            path: path.to_path_buf(),
+            line,
+            reason: "unterminated quoted value",
+        });
+    };
+    let trailing = trimmed[end + quote.len_utf8()..].trim();
+    if !trailing.is_empty() && !trailing.starts_with('#') {
+        return Err(DevVarsError::Entry {
+            path: path.to_path_buf(),
+            line,
+            reason: "unexpected characters after quoted value",
+        });
+    }
+    Ok(trimmed[..=end].to_string())
 }
 
 fn valid_name(name: &str) -> bool {
@@ -292,6 +412,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_export_prefix_and_multiline_quoted_values() {
+        let path = std::path::Path::new(".env");
+        let values = parse(
+            path,
+            "export TOKEN=plain\nMULTILINE=\"first\nsecond\" \nSINGLE='one\ntwo'\n",
+        )
+        .unwrap();
+        assert_eq!(values.get("TOKEN").unwrap(), "plain");
+        assert_eq!(values.get("MULTILINE").unwrap(), "first\nsecond");
+        assert_eq!(values.get("SINGLE").unwrap(), "one\ntwo");
+    }
+
+    #[test]
+    fn quoted_values_stop_at_unescaped_closing_quote() {
+        let path = std::path::Path::new(".env");
+        let values = parse(
+            path,
+            "A=\"x\" # comment\nB=\"y\"\nMULTILINE=\"first \\\"quoted\\\"\nsecond\"\n",
+        )
+        .unwrap();
+        assert_eq!(values.get("A").unwrap(), "x");
+        assert_eq!(values.get("B").unwrap(), "y");
+        assert_eq!(values.get("MULTILINE").unwrap(), "first \"quoted\"\nsecond");
+    }
+
+    #[test]
     fn rejects_invalid_entries_without_value_in_error() {
         let path = std::path::Path::new(".dev.vars");
         let error = parse(path, "TOKEN=super-secret\nBAD-NAME=also-secret\n")
@@ -359,6 +505,32 @@ mod tests {
         assert_eq!(env.get("CLOUDFLARE_API_TOKEN"), None);
         assert_eq!(env.get("WRANGLER_LOG"), None);
         assert_eq!(env.get("MINIFLARE_TEST"), None);
+    }
+
+    #[test]
+    fn wrangler_skips_dotenv_entries_that_cannot_be_bindings() {
+        let temp = temp_dir();
+        write(&temp.join("wrangler.toml"), "");
+        write(&temp.join(".env"), "OK=1\nBAD-NAME=2\nexport ALSO_OK=3\n");
+        let env =
+            LocalDevEnvironment::load(&temp.join("wrangler.toml"), LocalEnvProfile::Wrangler, None)
+                .unwrap();
+        assert_eq!(env.get("OK").as_deref(), Some("1"));
+        assert_eq!(env.get("ALSO_OK").as_deref(), Some("3"));
+        assert_eq!(env.report().filtered, 1);
+    }
+
+    #[test]
+    fn wrangler_skips_invalid_multiline_dotenv_entries_as_one_binding() {
+        let temp = temp_dir();
+        write(&temp.join("wrangler.toml"), "");
+        write(&temp.join(".env"), "BAD-NAME=\"a\nb\"\nOK=1\n");
+        let env =
+            LocalDevEnvironment::load(&temp.join("wrangler.toml"), LocalEnvProfile::Wrangler, None)
+                .unwrap();
+        assert_eq!(env.get("OK").as_deref(), Some("1"));
+        assert_eq!(env.get("BAD-NAME"), None);
+        assert_eq!(env.report().filtered, 1);
     }
 
     #[test]

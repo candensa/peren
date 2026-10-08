@@ -63,6 +63,17 @@ pub(super) const DISPATCH_HTTP: &str = r#"
   }
   await globalThis.__perenDrainWaitUntil();
   const upgrade = response.webSocket instanceof WebSocket;
+  const headerHasToken = (value, token) =>
+    value?.split(",").some((part) => part.trim().toLowerCase() === token) ?? false;
+  if (
+    (upgrade || response.status === 101) &&
+    (
+      !headerHasToken(request.headers.get("connection"), "upgrade") ||
+      !headerHasToken(request.headers.get("upgrade"), "websocket")
+    )
+  ) {
+    throw new TypeError("WebSocket response requires a WebSocket upgrade request");
+  }
   return {
     status: response.status,
     headers: Array.from(response.headers.entries()),

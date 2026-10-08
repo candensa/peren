@@ -1,5 +1,117 @@
 use super::support::*;
 
+fn websocket_upgrade_headers() -> Vec<(String, String)> {
+    vec![
+        ("connection".into(), "keep-alive, Upgrade".into()),
+        ("upgrade".into(), "h2c, websocket".into()),
+    ]
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn websocket_response_requires_upgrade_request() {
+    let mut runtime = WorkerRuntime::load(
+        bundle(
+            "export default {
+              fetch() {
+                const pair = new WebSocketPair();
+                const response = new Response(null, { status: 101 });
+                response.webSocket = pair[1];
+                return response;
+              }
+            };",
+        ),
+        limits(),
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        runtime
+            .dispatch_http(
+                HttpRequest {
+                    method: "GET".into(),
+                    url: "https://worker.invalid/plain".into(),
+                    headers: Vec::new(),
+                    body: Vec::new(),
+                    mtls: None,
+                },
+                InvocationLimits::new(4096, 10),
+            )
+            .await,
+        Err(EngineError::JavaScript(_))
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn websocket_response_requires_connection_upgrade_token() {
+    let mut runtime = WorkerRuntime::load(
+        bundle(
+            "export default {
+              fetch() {
+                const pair = new WebSocketPair();
+                const response = new Response(null, { status: 101 });
+                response.webSocket = pair[1];
+                return response;
+              }
+            };",
+        ),
+        limits(),
+    )
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        runtime
+            .dispatch_http(
+                HttpRequest {
+                    method: "GET".into(),
+                    url: "https://worker.invalid/plain".into(),
+                    headers: vec![("upgrade".into(), "websocket".into())],
+                    body: Vec::new(),
+                    mtls: None,
+                },
+                InvocationLimits::new(4096, 10),
+            )
+            .await,
+        Err(EngineError::JavaScript(_))
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn websocket_response_accepts_comma_separated_upgrade_tokens() {
+    let mut runtime = WorkerRuntime::load(
+        bundle(
+            "export default {
+              fetch() {
+                const pair = new WebSocketPair();
+                const response = new Response(null, { status: 101 });
+                response.webSocket = pair[1];
+                return response;
+              }
+            };",
+        ),
+        limits(),
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.invalid/ws".into(),
+                headers: websocket_upgrade_headers(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert!(response.upgrade);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn websocket_attachment_methods_persist_through_storage() {
     let mut runtime = WorkerRuntime::load_with_host(
@@ -135,7 +247,7 @@ async fn durable_object_state_rehydrates_accepted_websockets_from_storage() {
             HttpRequest {
                 method: "GET".into(),
                 url: "https://worker.invalid/accept".into(),
-                headers: Vec::new(),
+                headers: websocket_upgrade_headers(),
                 body: Vec::new(),
                 mtls: None,
             },
@@ -370,7 +482,7 @@ async fn websocket_close_removes_hibernation_record_from_storage() {
             HttpRequest {
                 method: "GET".into(),
                 url: "https://worker.invalid/accept".into(),
-                headers: Vec::new(),
+                headers: websocket_upgrade_headers(),
                 body: Vec::new(),
                 mtls: None,
             },
@@ -449,7 +561,7 @@ async fn websocket_upgrade_response_carries_attachment_identity() {
             HttpRequest {
                 method: "GET".into(),
                 url: "https://worker.invalid/websocket-upgrade".into(),
-                headers: Vec::new(),
+                headers: websocket_upgrade_headers(),
                 body: Vec::new(),
                 mtls: None,
             },
