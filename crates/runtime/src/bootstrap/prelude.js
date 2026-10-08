@@ -1,6 +1,6 @@
 import { core, primordials } from "ext:core/mod.js";
 
-const { ArrayFrom, ObjectCreate, ObjectDefineProperties, ObjectFreeze, PromiseAll, PromiseResolve, Uint8Array } = primordials;
+const { ArrayFrom, ObjectCreate, ObjectDefineProperties, ObjectDefineProperty, ObjectFreeze, ObjectIsExtensible, PromiseAll, PromiseResolve, Uint8Array } = primordials;
 const event = core.loadExtScript("ext:deno_web/02_event.js");
 const exception = core.loadExtScript("ext:deno_web/01_dom_exception.js");
 const abort = core.loadExtScript("ext:deno_web/03_abort_signal.js");
@@ -93,4 +93,3 @@ const consoleCompat = ObjectFreeze({
 const navigatorCompat = ObjectFreeze({
   userAgent: "Peren/0.1",
 });
-
