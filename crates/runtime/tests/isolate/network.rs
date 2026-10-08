@@ -47,6 +47,78 @@ async fn routes_outbound_fetch_through_host_capability() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn outbound_fetch_from_later_event_continuation_settles() {
+    let mut runtime = WorkerRuntime::load_with_hosts(
+        bundle(
+            "let notify;
+            let result = 'idle';
+            export default { async fetch(request) {
+              const url = new URL(request.url);
+              if (url.pathname === '/start') {
+                result = 'pending';
+                new Promise((resolve) => { notify = resolve; })
+                  .then(async () => {
+                    const upstream = await fetch('https://api.invalid/items', {
+                      method: 'POST',
+                      body: 'abc',
+                    });
+                    result = `OK ${upstream.status}:${await upstream.text()}`;
+                  }, (error) => {
+                    result = `ERR ${error.message}`;
+                  });
+                return new Response('started');
+              }
+              if (url.pathname === '/notify') {
+                notify();
+                await Promise.resolve();
+                await Promise.resolve();
+                return new Response('notified');
+              }
+              return new Response(result);
+            } };",
+        ),
+        limits(),
+        Arc::new(Host::default()),
+        Arc::new(FetchHost),
+    )
+    .await
+    .unwrap();
+
+    dispatch_path(&mut runtime, "/start").await;
+    dispatch_path(&mut runtime, "/notify").await;
+
+    let mut body = Vec::new();
+    for _ in 0..5 {
+        body = dispatch_path(&mut runtime, "/result").await;
+        if body.starts_with(b"OK ") {
+            break;
+        }
+    }
+
+    assert_eq!(
+        String::from_utf8(body).unwrap(),
+        "OK 202:https://api.invalid/items:3"
+    );
+}
+
+async fn dispatch_path(runtime: &mut WorkerRuntime, path: &str) -> Vec<u8> {
+    runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: format!("https://worker.invalid{path}"),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap()
+        .body
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn outbound_fetch_carries_selected_mtls_binding_identity() {
     let fetch = Arc::new(MtlsFetchHost {
         requests: Mutex::new(Vec::new()),

@@ -72,7 +72,11 @@ pub(crate) fn is_upgrade(headers: &HeaderMap) -> bool {
     let is_websocket = headers
         .get(header::UPGRADE)
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|token| token.trim().eq_ignore_ascii_case("websocket"))
+        });
     has_upgrade_token && is_websocket
 }
 
@@ -185,7 +189,7 @@ mod tests {
             header::CONNECTION,
             HeaderValue::from_static("keep-alive, Upgrade"),
         );
-        headers.insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+        headers.insert(header::UPGRADE, HeaderValue::from_static("h2c, websocket"));
 
         assert!(is_upgrade(&headers));
     }
