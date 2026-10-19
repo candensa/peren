@@ -79,3 +79,48 @@ fn checkpoint_returns_a_self_contained_database_and_resets_wal() {
     assert_eq!(restored.get("do", b"key").unwrap(), Some(b"value".to_vec()));
     assert_eq!(restored.revision().get(), 1);
 }
+
+#[test]
+fn checkpoint_recovers_from_torn_wal_header() {
+    let (_dir, path) = database();
+    let mut storage = CellStorage::open(&path).unwrap();
+    storage.put("do", b"key", b"value").unwrap();
+    let wal_path = path.with_file_name("cell.sqlite-wal");
+    let mut wal = fs::read(&wal_path).unwrap();
+    wal[..4].copy_from_slice(&[0, 0, 0, 0]);
+    fs::write(&wal_path, wal).unwrap();
+
+    assert!(matches!(
+        storage.replica(0),
+        Err(StorageError::MalformedWal)
+    ));
+    let checkpoint = storage.checkpoint().unwrap();
+    assert_eq!(checkpoint.revision.get(), 1);
+    assert!(storage.replica(0).unwrap().frames.is_empty());
+
+    let restored = path.with_file_name("checkpoint.sqlite");
+    fs::write(&restored, checkpoint.database).unwrap();
+    let restored = CellStorage::open_read_only(&restored).unwrap();
+    assert_eq!(restored.get("do", b"key").unwrap(), Some(b"value".to_vec()));
+}
+
+#[test]
+fn checkpoint_reports_busy_reader_before_returning_database_bytes() {
+    let (_dir, path) = database();
+    let mut storage = CellStorage::open(&path).unwrap();
+    storage.put("do", b"key", b"value").unwrap();
+
+    let reader = rusqlite::Connection::open(&path).unwrap();
+    reader.execute_batch("BEGIN").unwrap();
+    assert_eq!(
+        reader
+            .query_row("SELECT COUNT(*) FROM kv", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+
+    assert!(matches!(
+        storage.checkpoint(),
+        Err(StorageError::CheckpointBusy)
+    ));
+}

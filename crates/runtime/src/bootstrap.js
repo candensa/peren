@@ -872,9 +872,88 @@ function hostResponse(response) {
   });
 }
 
+const abortReason = (signal) => signal?.reason ?? new DOMException("The operation was aborted.", "AbortError");
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+function abortable(promise, signal) {
+  if (signal == null) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", abort, { once: true });
+    PromiseResolve(promise).then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function readBodyChunk(reader, signal) {
+  if (signal == null) return reader.read();
+  if (signal.aborted) {
+    const reason = abortReason(signal);
+    reader.cancel(reason).catch(() => {});
+    return Promise.reject(reason);
+  }
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      const reason = abortReason(signal);
+      reader.cancel(reason).catch(() => {});
+      reject(reason);
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    reader.read().then(
+      (value) => {
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function requestBodyBytes(request) {
+  throwIfAborted(request.signal);
+  if (request.body === null) return [];
+  const reader = request.body.getReader();
+  const chunks = [];
+  let length = 0;
+  try {
+    for (;;) {
+      const { done, value } = await readBodyChunk(reader, request.signal);
+      if (done) break;
+      const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+      chunks.push(chunk);
+      length += chunk.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  throwIfAborted(request.signal);
+  const body = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return ArrayFrom(body);
+}
+
 async function outboundFetch(input, init = {}) {
   const request = new Request(input, init);
-  const body = request.body === null ? [] : ArrayFrom(new Uint8Array(await request.arrayBuffer()));
+  const body = await requestBodyBytes(request);
   const mtls = init?.cf?.mtlsCertificate?.__perenMtlsBinding;
   const response = await core.ops.op_outbound_fetch({
     method: request.method,
@@ -1849,7 +1928,7 @@ class DurableObjectStub {
   }
   async fetch(input, init = {}) {
     const request = new Request(input, init);
-    const body = request.body === null ? [] : ArrayFrom(new Uint8Array(await request.arrayBuffer()));
+    const body = await requestBodyBytes(request);
     const response = await core.ops.op_durable_object_fetch({
       namespace: this.id.namespace,
       id: this.id.value,
@@ -2065,6 +2144,16 @@ const loaderExport = (module, exportName, kind) => {
   const key = String(exportName);
   const value = module?.[key];
   if (value === undefined) throw new TypeError(`module does not export ${kind} ${key}`);
+  if (kind === "entrypoint" && value != null && typeof value.fetch === "function") {
+    return ObjectFreeze(Object.assign(ObjectCreate(Object.getPrototypeOf(value)), value, {
+      async fetch(input = undefined, init = {}) {
+        if (input === undefined) return await value.fetch.call(value);
+        const request = new Request(input, init);
+        throwIfAborted(request.signal);
+        return await abortable(value.fetch.call(value, request, init), request.signal);
+      },
+    }));
+  }
   return value;
 };
 
@@ -2644,7 +2733,7 @@ function outboundBinding(binding) {
       const request = input instanceof Request ? input : new Request(input, init);
       const host = new URL(request.url).host;
       if (!allowed.has(host)) throw new TypeError(`outbound host ${host} is not allowed by this binding`);
-      return await outboundFetch(request);
+      return await outboundFetch(request, init);
     },
   });
 }
@@ -2727,7 +2816,7 @@ const serviceBinding = (service) => {
   const binding = {
     async fetch(input, init = {}) {
       const request = new Request(input, init);
-      const body = request.body === null ? [] : ArrayFrom(new Uint8Array(await request.arrayBuffer()));
+      const body = await requestBodyBytes(request);
       const response = await core.ops.op_service_fetch({
         service,
         request: {
@@ -2752,7 +2841,6 @@ globalThis.DurableObjectState = DurableObjectState;
 globalThis.RpcTarget = RpcTarget;
 globalThis.WebSocketRequestResponsePair = WebSocketRequestResponsePair;
 globalThis.WorkerEntrypoint = WorkerEntrypoint;
-
 class Workflow {
   constructor(binding, id) {
     this.binding = binding;

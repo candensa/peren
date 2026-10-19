@@ -368,6 +368,89 @@ async fn loader_binding_reports_missing_or_invalid_exports() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn loader_entrypoint_fetch_observes_abort_signal() {
+    let entry = ModuleName::parse("src/main.js").unwrap();
+    let bundle = WorkerBundle::new(
+        entry.clone(),
+        BTreeMap::from([
+            (
+                entry,
+                Module::new(
+                    ModuleKind::JavaScript,
+                    br"export default { async fetch(_request, env) {
+                        const worker = await env.LOADER.get('../lib/worker.js');
+                        const entrypoint = worker.getEntrypoint();
+                        const started = Date.now();
+                        try {
+                          await entrypoint.fetch('https://loaded.invalid/', { signal: AbortSignal.timeout(10) });
+                          return new Response('resolved');
+                        } catch (error) {
+                          return Response.json({
+                            rejected: true,
+                            elapsed: Date.now() - started,
+                            name: error.name,
+                          });
+                        }
+                    } };"
+                        .as_slice(),
+                )
+                .unwrap(),
+            ),
+            (
+                ModuleName::parse("lib/worker.js").unwrap(),
+                Module::new(
+                    ModuleKind::JavaScript,
+                    br"export default {
+                        async fetch() {
+                          await new Promise((resolve) => setTimeout(resolve, 1000));
+                          return new Response('late');
+                        }
+                      };"
+                    .as_slice(),
+                )
+                .unwrap(),
+            ),
+        ]),
+    )
+    .unwrap();
+    let mut environment = BTreeMap::new();
+    environment.insert(
+        "__perenBindings".to_string(),
+        r#"{"LOADER":{"type":"loader"}}"#.to_string(),
+    );
+    let mut runtime = WorkerRuntime::load_with_environment(
+        bundle,
+        limits(),
+        WorkerEnvironment::new(environment),
+        Arc::new(Host::default()),
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.invalid/loader-abort".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+    let body = serde_json::from_slice::<serde_json::Value>(&response.body).unwrap();
+
+    assert_eq!(body["rejected"], true);
+    assert!(
+        body["elapsed"].as_i64().unwrap() < 500,
+        "abort took too long: {body}"
+    );
+    assert_ne!(body["name"], "TypeError");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn javascript_wasm_example_executes_with_runtime_loader() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")

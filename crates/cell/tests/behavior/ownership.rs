@@ -367,6 +367,37 @@ async fn checkpoint_threshold_uses_wal_bytes_since_generation() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn failed_malformed_wal_recovery_checkpoint_drains_the_cell() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("cell.sqlite");
+    let mut cell = WorkerCell::activate(
+        &path,
+        lease(usize::MAX),
+        repository_rejecting_checkpoint(),
+        counter_bundle(),
+        isolate(),
+        WorkerEnvironment::empty(),
+    )
+    .await
+    .unwrap();
+
+    cell.dispatch_http(request("/increment"), invocation())
+        .await
+        .unwrap();
+    let wal_path = path.with_file_name("cell.sqlite-wal");
+    let mut wal = std::fs::read(&wal_path).unwrap();
+    wal[..4].copy_from_slice(&[0, 0, 0, 0]);
+    std::fs::write(&wal_path, wal).unwrap();
+
+    assert!(matches!(
+        cell.dispatch_http(request("/increment"), invocation())
+            .await,
+        Err(CellError::Repository(RepositoryError::Unavailable))
+    ));
+    assert_eq!(cell.state(), CellState::Draining);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn read_only_dispatch_does_not_publish_a_replica() {
     let repository = repository(false);
     let published = Arc::clone(&repository.image);

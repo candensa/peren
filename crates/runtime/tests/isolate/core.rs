@@ -165,6 +165,117 @@ async fn service_binding_fetches_through_host_capability() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn service_binding_fetch_refuses_aborted_request_before_host_call() {
+    let mut values = BTreeMap::new();
+    values.insert(
+        "__perenBindings".to_string(),
+        r#"{"AUTH":{"type":"service","service":"auth-worker"}}"#.to_string(),
+    );
+    let service = Arc::new(ServiceHost::default());
+    let mut runtime = WorkerRuntime::load_with_service(
+        bundle(
+            "export default { async fetch(_request, env) {
+                const controller = new AbortController();
+                controller.abort(new DOMException('stopped', 'AbortError'));
+                try {
+                  await env.AUTH.fetch('https://auth.invalid/session', { signal: controller.signal });
+                  return new Response('resolved');
+                } catch (error) {
+                  return Response.json({ name: error.name, message: error.message });
+                }
+            } };",
+        ),
+        limits(),
+        WorkerEnvironment::new(values),
+        Arc::new(Host::default()),
+        service.clone(),
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.invalid/service-abort".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({ "name": "AbortError", "message": "stopped" })
+    );
+    assert!(service.requests.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn service_binding_fetch_aborts_while_reading_streaming_body() {
+    let mut values = BTreeMap::new();
+    values.insert(
+        "__perenBindings".to_string(),
+        r#"{"AUTH":{"type":"service","service":"auth-worker"}}"#.to_string(),
+    );
+    let service = Arc::new(ServiceHost::default());
+    let mut runtime = WorkerRuntime::load_with_service(
+        bundle(
+            "export default { async fetch(_request, env) {
+                const body = new ReadableStream({
+                  start(controller) {
+                    controller.enqueue(new Uint8Array([1]));
+                  },
+                  cancel(reason) {
+                    globalThis.cancelled = reason.name;
+                  },
+                });
+                try {
+                  await env.AUTH.fetch('https://auth.invalid/session', {
+                    method: 'POST',
+                    body,
+                    duplex: 'half',
+                    signal: AbortSignal.timeout(10),
+                  });
+                  return new Response('resolved');
+                } catch (error) {
+                  return Response.json({ name: error.name, cancelled: globalThis.cancelled });
+                }
+            } };",
+        ),
+        limits(),
+        WorkerEnvironment::new(values),
+        Arc::new(Host::default()),
+        service.clone(),
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.invalid/service-abort-body".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({ "name": "TimeoutError", "cancelled": "TimeoutError" })
+    );
+    assert!(service.requests.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn mtls_certificate_binding_is_opaque_to_worker_code() {
     let mut values = BTreeMap::new();
     values.insert(

@@ -379,14 +379,26 @@ impl<L: OwnershipLease, R: ReplicaRepository> WorkerCell<L, R> {
         revision: peren_primitives::StorageRevision,
     ) -> Result<(), CellError> {
         self.verify().await?;
-        let replica = self
-            .storage
-            .lock()
-            .await
-            .replica(self.wal_offset)
-            .inspect_err(|_| {
+        let replica = {
+            let storage = self.storage.lock().await;
+            storage.replica(self.wal_offset)
+        };
+        let replica = match replica {
+            Ok(replica) => replica,
+            Err(StorageError::MalformedWal) => {
+                if let Err(error) = self.checkpoint().await {
+                    if self.state == CellState::Active {
+                        self.state = CellState::Draining;
+                    }
+                    return Err(error);
+                }
+                return Ok(());
+            }
+            Err(error) => {
                 self.state = CellState::Draining;
-            })?;
+                return Err(error.into());
+            }
+        };
         let offset = replica.offset;
         let wal_bytes = replica.frames.len();
         let receipt = self

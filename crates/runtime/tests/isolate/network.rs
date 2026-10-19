@@ -181,6 +181,74 @@ async fn outbound_fetch_carries_selected_mtls_binding_identity() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn outbound_fetch_aborts_while_reading_streaming_body() {
+    let fetch = Arc::new(MtlsFetchHost {
+        requests: Mutex::new(Vec::new()),
+    });
+    let mut runtime = WorkerRuntime::load_with_capabilities(
+        bundle(
+            "export default { async fetch() {
+              const signal = AbortSignal.timeout(10);
+              const body = new ReadableStream({
+                start(controller) {
+                  controller.enqueue(new Uint8Array([1]));
+                },
+                cancel(reason) {
+                  globalThis.cancelled = reason.name;
+                },
+              });
+              try {
+                await fetch('https://api.invalid/hang', {
+                  method: 'POST',
+                  body,
+                  duplex: 'half',
+                  signal,
+                });
+                return new Response('resolved');
+              } catch (error) {
+                return Response.json({ name: error.name, cancelled: globalThis.cancelled });
+              }
+            } };",
+        ),
+        limits(),
+        WorkerEnvironment::empty(),
+        Capabilities {
+            storage: Arc::new(Host::default()),
+            fetch: Some(fetch.clone()),
+            queue: None,
+            r2: None,
+            service: None,
+            durable: None,
+            cache: None,
+            kv: None,
+            ai: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let response = runtime
+        .dispatch_http(
+            HttpRequest {
+                method: "GET".into(),
+                url: "https://worker.invalid/".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                mtls: None,
+            },
+            InvocationLimits::new(4096, 10),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&response.body).unwrap(),
+        serde_json::json!({ "name": "TimeoutError", "cancelled": "TimeoutError" })
+    );
+    assert!(fetch.requests.lock().await.is_empty());
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn rejects_outbound_fetch_without_a_host_capability() {
     let mut runtime = WorkerRuntime::load(
         bundle("export default { async fetch() { await fetch('https://api.invalid/'); return new Response('unreachable'); } };"),

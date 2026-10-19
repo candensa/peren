@@ -146,6 +146,16 @@ const loaderExport = (module, exportName, kind) => {
   const key = String(exportName);
   const value = module?.[key];
   if (value === undefined) throw new TypeError(`module does not export ${kind} ${key}`);
+  if (kind === "entrypoint" && value != null && typeof value.fetch === "function") {
+    return ObjectFreeze(Object.assign(ObjectCreate(Object.getPrototypeOf(value)), value, {
+      async fetch(input = undefined, init = {}) {
+        if (input === undefined) return await value.fetch.call(value);
+        const request = new Request(input, init);
+        throwIfAborted(request.signal);
+        return await abortable(value.fetch.call(value, request, init), request.signal);
+      },
+    }));
+  }
   return value;
 };
 
