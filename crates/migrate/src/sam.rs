@@ -52,7 +52,7 @@ struct SamEnvironment {
 #[serde(untagged)]
 enum SamPolicy {
     Named(String),
-    Template(BTreeMap<String, serde_yaml::Value>),
+    Template(BTreeMap<String, serde_json::Value>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,7 +69,7 @@ fn parse_sam_template(text: &str) -> Result<SamTemplate, MigrateError> {
             reason,
         }
     })?;
-    serde_yaml::from_str(text).map_err(|e| MigrateError::ParseYaml {
+    serde_saphyr::from_str(text).map_err(|e| MigrateError::ParseYaml {
         format: "SAM template.yaml",
         message: e.to_string(),
     })
@@ -210,12 +210,10 @@ fn r2_warnings(name: &str) -> [MigrationWarning; 2] {
     ]
 }
 
-fn yaml_str_param(value: &serde_yaml::Value, key: &str) -> Option<String> {
-    let mapping = value.as_mapping()?;
-    for (k, v) in mapping {
-        if k.as_str() == Some(key) {
-            return v.as_str().map(std::string::ToString::to_string);
-        }
-    }
-    None
+fn yaml_str_param(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .as_object()?
+        .get(key)?
+        .as_str()
+        .map(std::string::ToString::to_string)
 }

@@ -56,7 +56,7 @@ impl StringOrList {
 struct ServerlessFunction {
     handler: String,
     #[serde(default)]
-    events: Vec<serde_yaml::Value>,
+    events: Vec<serde_json::Value>,
     #[serde(default)]
     environment: HashMap<String, String>,
 }
@@ -69,7 +69,7 @@ fn parse_serverless_yml(text: &str) -> Result<ServerlessYml, MigrateError> {
             reason,
         }
     })?;
-    serde_yaml::from_str(text).map_err(|e| MigrateError::ParseYaml {
+    serde_saphyr::from_str(text).map_err(|e| MigrateError::ParseYaml {
         format: "serverless.yml",
         message: e.to_string(),
     })
@@ -140,12 +140,12 @@ fn capabilities_from_iam_statements(
     Ok((bindings, warnings))
 }
 
-fn event_trigger(event: &serde_yaml::Value) -> Option<MigrationWarning> {
-    let mapping = event.as_mapping()?;
+fn event_trigger(event: &serde_json::Value) -> Option<MigrationWarning> {
+    let mapping = event.as_object()?;
     let (event_type, _) = mapping.iter().next()?;
     Some(MigrationWarning::UnmappedTrigger {
-        event_name: event_type.as_str().unwrap_or("?").to_string(),
-        event_type: event_type.as_str().unwrap_or("?").to_string(),
+        event_name: event_type.clone(),
+        event_type: event_type.clone(),
     })
 }
 
