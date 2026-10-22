@@ -1,6 +1,6 @@
 pub(super) const NODE_CRYPTO_SOURCE: &str = r#"
 
-const { core } = await import("ext:core/mod.js");
+import { core } from "ext:core/mod.js";
 import { Buffer } from "node:buffer";
 
 function bytes(value, encoding = "utf8") {
